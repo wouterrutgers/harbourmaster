@@ -3,10 +3,13 @@ package com.harbourmaster.optimizer;
 import static com.harbourmaster.Fixtures.*;
 import static org.junit.Assert.*;
 
+import com.harbourmaster.data.PortGraph;
+import com.harbourmaster.data.PortPathData;
 import com.harbourmaster.model.ActiveTask;
 import com.harbourmaster.model.CourierTask;
 import com.harbourmaster.model.OfferBundle;
 import com.harbourmaster.model.OfferScore;
+import com.harbourmaster.model.Port;
 import java.util.List;
 import java.util.Set;
 import org.junit.Test;
@@ -98,5 +101,29 @@ public class OfferRankerTest {
                 ranker.rank(A, List.of(), List.of(courier(1, A, B, 100)), 99, 0, optimizer.optimize(A, List.of()));
         assertFalse(scores.get(0).eligible());
         assertNull(scores.get(0).bundle);
+    }
+
+    @Test
+    public void remoteOfferDoesNotOutrankFourLoadedDeliveries() {
+        RouteOptimizer sailing = new RouteOptimizer(new PortGraph(PortPathData.load()));
+        OfferRanker offers = new OfferRanker(sailing);
+        List<ActiveTask> held = List.of(
+                loaded(courier(1, Port.PORT_ROBERTS, Port.DEEPFIN_POINT, 100)),
+                loaded(courier(2, Port.PORT_ROBERTS, Port.DEEPFIN_POINT, 100)),
+                loaded(courier(3, Port.PORT_ROBERTS, Port.DEEPFIN_POINT, 100)),
+                loaded(courier(4, Port.PORT_ROBERTS, Port.DEEPFIN_POINT, 100)));
+        CourierTask fish = courier(5, Port.PORT_PISCARILIUS, Port.PORT_ROBERTS, 100);
+
+        OfferScore score = offers.rank(
+                        Port.PORT_ROBERTS,
+                        held,
+                        List.of(fish),
+                        99,
+                        1,
+                        sailing.optimizeForExperience(Port.PORT_ROBERTS, held))
+                .get(0);
+        assertTrue(score.eligible());
+        assertTrue(score.marginalDistance > 1000);
+        assertNull(score.bundle);
     }
 }

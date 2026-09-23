@@ -47,7 +47,7 @@ import net.runelite.client.ui.overlay.OverlayManager;
 
 @PluginDescriptor(
         name = "Harbourmaster",
-        description = "Optimizes Sailing courier tasks, noticeboard choices, routes, cargo and dock actions",
+        description = "Optimizes Sailing courier routes and suggests tasks, with cargo and dock guidance",
         tags = {"sailing", "port", "courier", "cargo", "tasks", "route", "optimizer", "navigation"})
 public class HarbourmasterPlugin extends Plugin {
     @Inject
@@ -228,8 +228,9 @@ public class HarbourmasterPlugin extends Plugin {
             route = RoutePlan.unavailable("Route optimiser disabled");
         }
         boolean rankOffers = noticeboard.isOpen() && config.rankOffers();
-        RoutePlan base =
-                rankOffers && config.enableOptimizer() ? optimizer.optimize(noticeboard.getPort(), held) : route;
+        RoutePlan base = rankOffers && config.enableOptimizer()
+                ? optimizer.optimizeForExperience(noticeboard.getPort(), held)
+                : route;
         List<OfferScore> offers = rankOffers
                 ? ranker.rank(noticeboard.getPort(), held, noticeboard.getOffers(), level, freeSlots, base)
                 : List.of();

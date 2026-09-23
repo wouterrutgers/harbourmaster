@@ -4,6 +4,7 @@ import static com.harbourmaster.Fixtures.*;
 import static org.junit.Assert.*;
 
 import com.harbourmaster.data.PortGraph;
+import com.harbourmaster.data.PortPathData;
 import com.harbourmaster.model.ActiveTask;
 import com.harbourmaster.model.CourierTask;
 import com.harbourmaster.model.DockChecklist;
@@ -12,6 +13,7 @@ import com.harbourmaster.model.Port;
 import com.harbourmaster.model.RouteLeg;
 import com.harbourmaster.model.RoutePlan;
 import com.harbourmaster.optimizer.RouteOptimizer;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import net.runelite.api.coords.WorldPoint;
@@ -69,6 +71,29 @@ public class RouteTrackerTest {
         HarbourmasterSnapshot accepted = update(A, A, List.of(held, accepted(courier(2, A, D, 100))));
         assertSame(A, accepted.nextPort());
         assertNull(accepted.currentLeg);
+    }
+
+    @Test
+    public void remotePickupDoesNotInterruptFourPendingDeliveries() {
+        RouteTracker sailing = new RouteTracker(new RouteOptimizer(new PortGraph(PortPathData.load())));
+        List<ActiveTask> deliveries = List.of(
+                loaded(courier(1, Port.PORT_ROBERTS, Port.DEEPFIN_POINT, 100)),
+                loaded(courier(2, Port.PORT_ROBERTS, Port.DEEPFIN_POINT, 100)),
+                loaded(courier(3, Port.PORT_ROBERTS, Port.DEEPFIN_POINT, 100)),
+                loaded(courier(4, Port.PORT_ROBERTS, Port.DEEPFIN_POINT, 100)));
+        ActiveTask newTask = accepted(courier(5, Port.PORT_PISCARILIUS, Port.PORT_ROBERTS, 100));
+        assertSame(
+                Port.DEEPFIN_POINT,
+                sailing.update(Port.PORT_ROBERTS, deliveries).stops.get(0).port);
+
+        List<ActiveTask> held = new ArrayList<>(deliveries);
+        held.add(newTask);
+        assertSame(
+                Port.DEEPFIN_POINT,
+                sailing.update(Port.PORT_ROBERTS, held).stops.get(0).port);
+        assertSame(
+                Port.PORT_PISCARILIUS,
+                sailing.update(Port.DEEPFIN_POINT, List.of(newTask)).stops.get(0).port);
     }
 
     @Test

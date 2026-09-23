@@ -34,8 +34,8 @@ public interface HarbourmasterConfig extends Config {
 
     @ConfigItem(
             keyName = "rankOffers",
-            name = "Highlight best offers",
-            description = "Highlight the best courier job or combination by XP per added sailing tile.",
+            name = "Highlight recommended offers",
+            description = "Highlight courier jobs based on XP, added sailing distance and held tasks.",
             section = noticeboard,
             position = 2)
     default boolean rankOffers() {
@@ -45,8 +45,8 @@ public interface HarbourmasterConfig extends Config {
     @Alpha
     @ConfigItem(
             keyName = "bestOfferColor",
-            name = "Best offer colour",
-            description = "Colour for the recommended courier jobs and nearby task boards.",
+            name = "Recommended offer colour",
+            description = "Colour for recommended courier jobs and nearby task boards.",
             section = noticeboard,
             position = 3)
     default Color bestOfferColor() {
@@ -59,7 +59,7 @@ public interface HarbourmasterConfig extends Config {
     @ConfigItem(
             keyName = "enableOptimizer",
             name = "Enable route optimiser",
-            description = "Plan the shortest route for all held courier tasks.",
+            description = "Find an optimized route that considers distance, task XP and free slots.",
             section = route,
             position = 0)
     default boolean enableOptimizer() {

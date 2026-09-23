@@ -35,7 +35,7 @@ public final class RouteTracker {
         Port firstStop = pendingStop != null && pendingStop.events.stream().anyMatch(event -> pending(event, tasks))
                 ? pendingStop.port
                 : null;
-        RoutePlan route = optimizer.optimize(start, boatPosition, tasks, firstStop);
+        RoutePlan route = optimizer.optimizeForExperience(start, boatPosition, tasks, firstStop);
         previousTasks = List.copyOf(tasks);
         if (route.available) {
             pendingStop = route.stops.isEmpty() ? null : route.stops.get(0);

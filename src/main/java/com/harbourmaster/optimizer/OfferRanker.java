@@ -32,7 +32,7 @@ public final class OfferRanker {
             }
             List<ActiveTask> candidate = new ArrayList<>(held);
             candidate.add(new ActiveTask(5, task.id, task, 0, 0));
-            double marginal = Math.max(0, optimizer.optimize(start, candidate).distance - base.distance);
+            double marginal = Math.max(0, optimizer.optimizeForExperience(start, candidate).distance - base.distance);
             boolean free = marginal < 0.0000001;
             scores.add(new OfferScore(
                     task,
@@ -77,7 +77,7 @@ public final class OfferRanker {
                 }
             }
             if (tasks.size() > 1) {
-                marginal = Math.max(0, optimizer.optimize(start, candidate).distance - base.distance);
+                marginal = Math.max(0, optimizer.optimizeForExperience(start, candidate).distance - base.distance);
             }
             OfferBundle bundle = new OfferBundle(tasks, marginal);
             if (best == null
@@ -87,6 +87,13 @@ public final class OfferRanker {
                                     || (bundle.score == best.score && bundle.experience > best.experience)))) {
                 best = bundle;
             }
+        }
+        int heldExperience = held.stream()
+                .filter(task -> !task.isFinished())
+                .mapToInt(task -> Math.max(0, task.definition.experience))
+                .sum();
+        if (best != null && !best.freeTravel && heldExperience > 0 && best.score < heldExperience / base.distance) {
+            return null;
         }
         return best;
     }
