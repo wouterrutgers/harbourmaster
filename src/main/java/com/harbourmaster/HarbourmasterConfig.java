@@ -164,7 +164,7 @@ public interface HarbourmasterConfig extends Config {
     @ConfigItem(
             keyName = "highlightGangplank",
             name = "Highlight gangplank",
-            description = "Highlight the gangplank for boarding with cargo or going ashore for dock actions.",
+            description = "Highlight the gangplank when boarding for cargo or going ashore for dock actions.",
             section = dock,
             position = 7)
     default boolean highlightGangplank() {

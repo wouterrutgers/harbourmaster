@@ -3,9 +3,11 @@ package com.harbourmaster.overlay;
 import com.harbourmaster.HarbourmasterConfig;
 import com.harbourmaster.HarbourmasterPlugin;
 import com.harbourmaster.model.CourierTask;
+import com.harbourmaster.model.HarbourmasterSnapshot;
 import com.harbourmaster.model.OfferBundle;
 import com.harbourmaster.model.OfferScore;
 import java.awt.BasicStroke;
+import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
@@ -15,9 +17,11 @@ import net.runelite.api.Client;
 import net.runelite.api.Point;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
+import net.runelite.client.ui.FontManager;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
 import net.runelite.client.ui.overlay.OverlayPosition;
+import net.runelite.client.ui.overlay.OverlayUtil;
 import net.runelite.client.ui.overlay.tooltip.Tooltip;
 import net.runelite.client.ui.overlay.tooltip.TooltipManager;
 
@@ -41,29 +45,45 @@ public final class NoticeboardOverlay extends Overlay {
 
     @Override
     public Dimension render(Graphics2D graphics) {
+        HarbourmasterSnapshot state = plugin.getSnapshot();
+        boolean openingDetails = plugin.getNoticeboard().isOpeningDetails();
         if (!config.rankOffers()
-                || !plugin.getSnapshot().boardOpen
-                || !visible(InterfaceID.PortTaskBoard.CONTAINER)
+                || !state.boardOpen
                 || visible(InterfaceID.Worldmap.CONTENT)
-                || visible(InterfaceID.PortTaskInfo.WINDOW)) {
+                || visible(InterfaceID.PortTaskInfo.WINDOW)
+                || !openingDetails && !visible(InterfaceID.PortTaskBoard.CONTAINER)) {
             return null;
         }
         Graphics2D drawing = (Graphics2D) graphics.create();
         drawing.setColor(config.bestOfferColor());
         drawing.setStroke(new BasicStroke(3));
         Point mouse = client.getMouseCanvasPosition();
-        for (OfferScore offer : plugin.getSnapshot().offers) {
+        for (OfferScore offer : state.offers) {
             Widget widget = plugin.getNoticeboard().getWidgets().get(offer.task.databaseRow);
-            if (widget == null || widget.isHidden()) {
+            if (widget == null || !openingDetails && widget.isHidden()) {
                 continue;
             }
             Rectangle bounds = widget.getBounds();
             if (offer.bundle != null) {
                 drawing.draw(bounds);
             }
-            if (bounds.contains(mouse.getX(), mouse.getY())) {
+            if (!openingDetails && bounds.contains(mouse.getX(), mouse.getY())) {
                 tooltips.add(new Tooltip(details(offer)));
             }
+        }
+        if (!openingDetails
+                && state.offers.stream().anyMatch(OfferScore::scorable)
+                && state.offers.stream().noneMatch(offer -> offer.bundle != null)) {
+            String message = "No worthwhile offer right now";
+            Rectangle bounds = client.getWidget(InterfaceID.PortTaskBoard.FRAME).getBounds();
+            drawing.setFont(FontManager.getRunescapeSmallFont());
+            OverlayUtil.renderTextLocation(
+                    drawing,
+                    new Point(
+                            bounds.x + (bounds.width - drawing.getFontMetrics().stringWidth(message)) / 2,
+                            bounds.y + bounds.height - 11),
+                    message,
+                    Color.WHITE);
         }
         drawing.dispose();
         return null;
@@ -90,6 +110,9 @@ public final class NoticeboardOverlay extends Overlay {
             if (offer.task.experience >= 0) {
                 text.append("<br>").append(efficiency(offer.score, offer.freeTravel));
             }
+        }
+        if (offer.task.delivery.noticeboardObject < 0) {
+            text.append("<br>No task board at this delivery port");
         }
         if (offer.bundle != null && offer.bundle.tasks.size() > 1) {
             OfferBundle bundle = offer.bundle;

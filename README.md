@@ -1,11 +1,12 @@
 # Harbourmaster
 
-Harbourmaster helps you choose and complete Sailing courier tasks.
+Harbourmaster helps you earn Sailing XP efficiently from courier tasks.
 
-- Highlights recommended offers and combinations, taking your current tasks into account.
-- Tries to find an optimized pickup and delivery route, with directions drawn on screen.
+- Highlights recommended offers and combinations based on your current tasks.
+- Guides you along an optimized pickup and delivery route.
+- Highlights dock objects and labels task cargo to help you complete each stop.
 
-The route considers sailing distance, task XP and the value of freeing task slots. It estimates that slot value from the average known XP of unfinished tasks, so several deliveries at one port can take priority even when the full route is longer.
+The route balances sailing distance with task XP and the value of freeing task slots. It uses the average known XP of unfinished tasks to estimate that slot value, so delivering several tasks at one port can take priority over a shorter route.
 
 ## Screenshots
 

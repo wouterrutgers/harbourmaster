@@ -15,9 +15,21 @@ public final class NoticeboardTracker {
     private List<CourierTask> lastOffers = List.of();
     private Map<Integer, Widget> widgets = Map.of();
     private Port lastPort;
+    private boolean openingDetails;
+    private boolean detailsOpen;
     private boolean open;
 
     public void scan(Client client, PortTaskCatalog catalog) {
+        Widget details = client.getWidget(InterfaceID.PortTaskInfo.WINDOW);
+        if (details != null && !details.isHidden()) {
+            openingDetails = false;
+            detailsOpen = true;
+            return;
+        }
+        if (openingDetails) {
+            return;
+        }
+        detailsOpen = false;
         Widget container = client.getWidget(InterfaceID.PortTaskBoard.CONTAINER);
         open = container != null && !container.isHidden();
         if (!open) {
@@ -51,10 +63,21 @@ public final class NoticeboardTracker {
         return listener != null && listener.length > 3 && listener[3] instanceof Integer ? (Integer) listener[3] : null;
     }
 
+    public void beginOpeningDetails(Widget widget) {
+        if (widget != null) {
+            Integer row = databaseRow(widget.getOnOpListener());
+            if (row != null && widgets.containsKey(row)) {
+                openingDetails = true;
+            }
+        }
+    }
+
     public void clear() {
         lastOffers = List.of();
         widgets = Map.of();
         lastPort = null;
+        openingDetails = false;
+        detailsOpen = false;
         open = false;
     }
 
@@ -72,5 +95,13 @@ public final class NoticeboardTracker {
 
     public boolean isOpen() {
         return open;
+    }
+
+    public boolean isDetailsOpen() {
+        return detailsOpen;
+    }
+
+    public boolean isOpeningDetails() {
+        return openingDetails;
     }
 }

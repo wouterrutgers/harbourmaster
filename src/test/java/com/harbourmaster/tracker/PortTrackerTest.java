@@ -6,6 +6,7 @@ import com.harbourmaster.ApiStub;
 import com.harbourmaster.model.Port;
 import java.util.List;
 import net.runelite.api.Client;
+import net.runelite.api.GameObject;
 import net.runelite.api.IndexedObjectSet;
 import net.runelite.api.Player;
 import net.runelite.api.Scene;
@@ -14,6 +15,7 @@ import net.runelite.api.WorldEntity;
 import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
+import net.runelite.api.gameval.VarbitID;
 import org.junit.Test;
 
 public class PortTrackerTest {
@@ -22,6 +24,7 @@ public class PortTrackerTest {
     private boolean entityAvailable = true;
     private boolean instance;
     private boolean aboard = true;
+    private boolean atSea;
     private final int[][][] chunks = new int[4][13][13];
     private final WorldView boat = ApiStub.of(WorldView.class, (method, arguments) -> {
         switch (method) {
@@ -103,7 +106,8 @@ public class PortTrackerTest {
             case "getWorldView":
                 return world;
             case "getVarbitValue":
-                return 0;
+                assertEquals(VarbitID.SAILING_TRANSMIT_IS_AT_SEA, arguments[0]);
+                return atSea ? 1 : 0;
             default:
                 throw new AssertionError(method);
         }
@@ -141,5 +145,30 @@ public class PortTrackerTest {
     @Test
     public void sceneScanToleratesAnEntityWhoseWorldViewIsNotLoadedYet() {
         tracker.scanScene(client);
+    }
+
+    @Test
+    public void boatAtPortRobertsRecognizesDockWithDistantBoard() {
+        location = Port.PORT_ROBERTS.navigationLocation;
+        atSea = true;
+        tracker.add(ApiStub.of(GameObject.class, (method, arguments) -> {
+            switch (method) {
+                case "getId":
+                    return Port.PORT_ROBERTS.noticeboardObject;
+                case "getWorldView":
+                    return world;
+                case "getLocalLocation":
+                    return new LocalPoint(64 + 30 * 128, 64, WorldView.TOPLEVEL);
+                default:
+                    throw new AssertionError(method);
+            }
+        }));
+
+        tracker.update(client, null);
+        assertSame(Port.PORT_ROBERTS, tracker.getDock());
+
+        atSea = false;
+        tracker.update(client, null);
+        assertSame(Port.PORT_ROBERTS, tracker.getDock());
     }
 }

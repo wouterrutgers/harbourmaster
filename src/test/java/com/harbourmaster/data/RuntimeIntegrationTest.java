@@ -16,12 +16,14 @@ import java.util.Map;
 import net.runelite.api.Client;
 import net.runelite.api.ItemComposition;
 import net.runelite.api.gameval.DBTableID;
+import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.widgets.Widget;
 import org.junit.Test;
 
 public class RuntimeIntegrationTest {
     private final Map<Integer, Map<String, Object>> rows = new HashMap<>();
     private boolean boardHidden;
+    private boolean detailsOpen;
     private Widget[] entries = new Widget[0];
     private final Widget board = ApiStub.of(Widget.class, (method, arguments) -> {
         switch (method) {
@@ -32,6 +34,12 @@ public class RuntimeIntegrationTest {
             default:
                 throw new AssertionError(method);
         }
+    });
+    private final Widget detailsWindow = ApiStub.of(Widget.class, (method, arguments) -> {
+        if (method.equals("isHidden")) {
+            return false;
+        }
+        throw new AssertionError(method);
     });
     private final Client client = ApiStub.of(Client.class, (method, arguments) -> {
         switch (method) {
@@ -48,7 +56,10 @@ public class RuntimeIntegrationTest {
                     throw new AssertionError(itemMethod);
                 });
             case "getWidget":
-                return board;
+                if (arguments[0].equals(InterfaceID.PortTaskInfo.WINDOW)) {
+                    return detailsOpen ? detailsWindow : null;
+                }
+                return arguments[0].equals(InterfaceID.PortTaskBoard.CONTAINER) ? board : null;
             default:
                 throw new AssertionError(method);
         }
@@ -132,6 +143,38 @@ public class RuntimeIntegrationTest {
         assertTrue(tracker.getOffers().isEmpty());
         assertTrue(tracker.getWidgets().isEmpty());
         assertNull(tracker.getPort());
+    }
+
+    @Test
+    public void openingTaskDetailsPreservesBoardOffersUntilTheWindowCloses() {
+        for (int databaseRow : List.of(8664, 8665)) {
+            Map<String, Object> courier = row(databaseRow - 8663, 0);
+            courier.put(DBTableID.PortTask.COL_CARGO + ":0", 200);
+            courier.put(DBTableID.PortTask.COL_CARGO + ":1", 3);
+            rows.put(databaseRow, courier);
+        }
+        PortTaskCatalog catalog = new PortTaskCatalog();
+        catalog.load(client);
+        entries = new Widget[] {entry(new Object[] {1, 2, 3, 8664}), entry(new Object[] {1, 2, 3, 8665})};
+        NoticeboardTracker tracker = new NoticeboardTracker();
+        tracker.scan(client, catalog);
+        tracker.beginOpeningDetails(entry(null));
+        tracker.beginOpeningDetails(entries[0]);
+
+        boardHidden = true;
+        tracker.scan(client, catalog);
+        assertEquals(2, tracker.getOffers().size());
+
+        detailsOpen = true;
+        entries = new Widget[] {entry(new Object[] {1, 2, 3, 8665})};
+        tracker.scan(client, catalog);
+        assertEquals(2, tracker.getOffers().size());
+
+        detailsOpen = false;
+        boardHidden = false;
+        tracker.scan(client, catalog);
+        assertEquals(1, tracker.getOffers().size());
+        assertEquals(8665, tracker.getOffers().get(0).databaseRow);
     }
 
     private static Widget entry(Object[] listener) {

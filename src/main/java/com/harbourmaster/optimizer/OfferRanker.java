@@ -60,6 +60,8 @@ public final class OfferRanker {
                 eligible.add(score);
             }
         }
+        boolean alreadyEndsWithoutBoard =
+                !base.stops.isEmpty() && base.stops.get(base.stops.size() - 1).port.noticeboardObject < 0;
         OfferBundle best = null;
         for (int mask = 1; mask < (1 << eligible.size()); mask++) {
             if (Integer.bitCount(mask) > freeSlots) {
@@ -67,19 +69,20 @@ public final class OfferRanker {
             }
             List<CourierTask> tasks = new ArrayList<>();
             List<ActiveTask> candidate = new ArrayList<>(held);
-            double marginal = 0;
             for (int index = 0; index < eligible.size(); index++) {
                 if ((mask & (1 << index)) != 0) {
                     OfferScore score = eligible.get(index);
                     tasks.add(score.task);
                     candidate.add(new ActiveTask(5 + index, score.task.id, score.task, 0, 0));
-                    marginal = score.marginalDistance;
                 }
             }
-            if (tasks.size() > 1) {
-                marginal = Math.max(0, optimizer.optimizeForExperience(start, candidate).distance - base.distance);
+            RoutePlan route = optimizer.optimizeForExperience(start, candidate);
+            if (!route.available
+                    || (!alreadyEndsWithoutBoard
+                            && route.stops.get(route.stops.size() - 1).port.noticeboardObject < 0)) {
+                continue;
             }
-            OfferBundle bundle = new OfferBundle(tasks, marginal);
+            OfferBundle bundle = new OfferBundle(tasks, Math.max(0, route.distance - base.distance));
             if (best == null
                     || (bundle.freeTravel && !best.freeTravel)
                     || (bundle.freeTravel == best.freeTravel

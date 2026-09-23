@@ -6,6 +6,7 @@ import com.harbourmaster.data.CargoHoldObjects;
 import com.harbourmaster.model.HarbourmasterSnapshot;
 import com.harbourmaster.model.Port;
 import com.harbourmaster.model.RouteEvent;
+import com.harbourmaster.tracker.CargoTracker;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Dimension;
@@ -15,13 +16,17 @@ import java.util.ArrayList;
 import java.util.List;
 import javax.inject.Inject;
 import net.runelite.api.Client;
+import net.runelite.api.EquipmentInventorySlot;
 import net.runelite.api.GameObject;
 import net.runelite.api.GroundObject;
+import net.runelite.api.Item;
+import net.runelite.api.ItemContainer;
 import net.runelite.api.Point;
 import net.runelite.api.Tile;
 import net.runelite.api.TileObject;
 import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
+import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.gameval.ObjectID;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
@@ -49,12 +54,14 @@ public final class DockOverlay extends Overlay {
         }
         HarbourmasterSnapshot state = plugin.getSnapshot();
         WorldView playerWorld = client.getLocalPlayer().getWorldView();
+        boolean fetchCargo =
+                state.dock.hasUnload() && playerWorld.isTopLevel() && !state.depositCargo && !carryingDelivery(state);
         for (GameObject object : plugin.getPorts().getObjects()) {
             Port port = Port.fromObject(object.getId());
             if (config.highlightGangplank() && state.dock.port != null) {
                 boolean gangplank = object.getId() == ObjectID.SAILING_GANGPLANK_PROXY
                         || port == state.dock.port && object.getId() == port.gangplankObject;
-                boolean boarding = state.depositCargo
+                boolean boarding = (state.depositCargo || fetchCargo)
                         && playerWorld.isTopLevel()
                         && gangplank
                         && object.getWorldView().isTopLevel();
@@ -67,8 +74,11 @@ public final class DockOverlay extends Overlay {
                     drawGangplank(
                             graphics,
                             object,
-                            boarding || !state.dock.hasUnload() ? config.loadColor() : config.unloadColor(),
-                            List.of(boarding ? "Board to deposit cargo" : "Gangplank to " + state.dock.port.name));
+                            state.depositCargo || !state.dock.hasUnload() ? config.loadColor() : config.unloadColor(),
+                            List.of(
+                                    boarding
+                                            ? state.depositCargo ? "Board to deposit cargo" : "Board to fetch crates"
+                                            : "Gangplank to " + state.dock.port.name));
                 }
             }
             if (port != null && object.getId() == port.noticeboardObject && config.highlightNoticeboards()) {
@@ -111,6 +121,13 @@ public final class DockOverlay extends Overlay {
             }
         }
         return null;
+    }
+
+    private boolean carryingDelivery(HarbourmasterSnapshot state) {
+        ItemContainer equipment = client.getItemContainer(InventoryID.WORN);
+        Item weapon = equipment == null ? null : equipment.getItem(EquipmentInventorySlot.WEAPON.getSlotIdx());
+        CargoTracker.Destination destination = weapon == null ? null : state.cargo.get(weapon.getId());
+        return destination != null && destination.unload;
     }
 
     private static void draw(Graphics2D graphics, GameObject object, Color color, List<String> lines) {

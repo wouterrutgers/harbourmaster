@@ -17,6 +17,7 @@ import net.runelite.api.gameval.ObjectID;
 import net.runelite.api.gameval.VarbitID;
 
 public final class PortTracker {
+    private static final int DOCK_APPROACH_DISTANCE = 3;
     private final Set<GameObject> objects = new HashSet<>();
     private Port dock;
     private Port associated;
@@ -84,10 +85,17 @@ public final class PortTracker {
         int closestObject = 25;
         for (GameObject object : objects) {
             Port port = Port.fromObject(object.getId());
-            if (location == null || port == null || !object.getWorldView().isTopLevel() || atSea) {
+            if (location == null || port == null || !object.getWorldView().isTopLevel()) {
                 continue;
             }
-            int distance = location.distanceTo(WorldPoint.fromLocalInstance(client, object.getLocalLocation()));
+            int approachDistance =
+                    boatPosition == null ? Integer.MAX_VALUE : boatPosition.distanceTo(port.navigationLocation);
+            if (atSea && approachDistance > DOCK_APPROACH_DISTANCE) {
+                continue;
+            }
+            int distance = approachDistance <= DOCK_APPROACH_DISTANCE
+                    ? approachDistance
+                    : location.distanceTo(WorldPoint.fromLocalInstance(client, object.getLocalLocation()));
             if (distance < closestObject) {
                 closestObject = distance;
                 dock = port;

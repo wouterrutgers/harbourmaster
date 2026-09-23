@@ -34,8 +34,11 @@ import net.runelite.api.events.GameObjectDespawned;
 import net.runelite.api.events.GameObjectSpawned;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.events.WorldViewUnloaded;
+import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.VarbitID;
+import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
@@ -144,6 +147,14 @@ public class HarbourmasterPlugin extends Plugin {
     }
 
     @Subscribe
+    public void onMenuOptionClicked(MenuOptionClicked event) {
+        Widget details = client.getWidget(InterfaceID.PortTaskInfo.WINDOW);
+        if (noticeboard.isOpen() && (details == null || details.isHidden())) {
+            noticeboard.beginOpeningDetails(event.getWidget());
+        }
+    }
+
+    @Subscribe
     public void onGameStateChanged(GameStateChanged event) {
         if (event.getGameState() == GameState.LOGIN_SCREEN || event.getGameState() == GameState.HOPPING) {
             clear();
@@ -196,6 +207,9 @@ public class HarbourmasterPlugin extends Plugin {
             catalog.load(client);
         }
         noticeboard.scan(client, catalog);
+        if (noticeboard.isDetailsOpen() || noticeboard.isOpeningDetails()) {
+            return;
+        }
         ports.update(client, noticeboard.isOpen() ? noticeboard.getPort() : null);
         List<ActiveTask> held = activeTasks.read(
                 client::getVarbitValue, client::getVarpValue, catalog::byId, catalog::isIgnoredTask, ports.getStart());

@@ -126,4 +126,46 @@ public class OfferRankerTest {
         assertTrue(score.marginalDistance > 1000);
         assertNull(score.bundle);
     }
+
+    @Test
+    public void deliveryWithoutABoardNeedsAnOnwardTaskBeforeItIsRecommended() {
+        RouteOptimizer sailing = new RouteOptimizer(new PortGraph(PortPathData.load()));
+        OfferRanker offers = new OfferRanker(sailing);
+        CourierTask stranded = courier(1, Port.PORT_PISCARILIUS, Port.PISCATORIS, 1000);
+        CourierTask returnTask = courier(2, Port.PISCATORIS, Port.PORT_PISCARILIUS, 100);
+        assertNull(offers.rank(
+                        Port.PORT_PISCARILIUS,
+                        List.of(),
+                        List.of(stranded),
+                        99,
+                        2,
+                        sailing.optimizeForExperience(Port.PORT_PISCARILIUS, List.of()))
+                .get(0)
+                .bundle);
+
+        List<OfferScore> scores = offers.rank(
+                Port.PORT_PISCARILIUS,
+                List.of(),
+                List.of(stranded, returnTask),
+                99,
+                2,
+                sailing.optimizeForExperience(Port.PORT_PISCARILIUS, List.of()));
+        assertEquals(Set.of(stranded, returnTask), Set.copyOf(scores.get(0).bundle.tasks));
+        assertNotNull(scores.get(1).bundle);
+
+        CourierTask companion = courier(3, Port.PORT_PISCARILIUS, Port.PISCATORIS, 100);
+        List<ActiveTask> held = List.of(loaded(stranded));
+        assertEquals(
+                List.of(companion),
+                offers.rank(
+                                Port.PORT_PISCARILIUS,
+                                held,
+                                List.of(companion),
+                                99,
+                                1,
+                                sailing.optimizeForExperience(Port.PORT_PISCARILIUS, held))
+                        .get(0)
+                        .bundle
+                        .tasks);
+    }
 }
