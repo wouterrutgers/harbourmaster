@@ -11,11 +11,11 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 import net.runelite.api.coords.WorldPoint;
 
 public final class CourierCyclePlanner {
-    private static final int MAX_BUNDLE_CANDIDATES = 5;
-    private static final int MAX_PLANNED_OFFERS = 5;
+    private static final int BUNDLE_SEARCH_WIDTH = 8;
     private static final int MAX_ROUTE_EVENTS = 15;
     private final RouteOptimizer optimizer;
     private final CourierTimeModel timeModel = new CourierTimeModel();
@@ -32,6 +32,18 @@ public final class CourierCyclePlanner {
             int sailingLevel,
             int freeSlots,
             int tasksUntilReset) {
+        return plan(start, boatPosition, held, observedOffers, sailingLevel, freeSlots, tasksUntilReset, List.of());
+    }
+
+    public CourierPlan plan(
+            Port start,
+            WorldPoint boatPosition,
+            List<ActiveTask> held,
+            Map<Port, List<CourierTask>> observedOffers,
+            int sailingLevel,
+            int freeSlots,
+            int tasksUntilReset,
+            List<CourierTask> retainedOffers) {
         CourierPlan best = evaluate(start, boatPosition, held, List.of(), freeSlots, tasksUntilReset);
         if (!best.available) {
             return best;
@@ -45,47 +57,59 @@ public final class CourierCyclePlanner {
             incompleteTasks++;
             heldEvents += (task.pickupRemaining() > 0 ? 1 : 0) + 1;
         }
-        int maximumOffers = Math.min(MAX_PLANNED_OFFERS, freeSlots + incompleteTasks);
-        maximumOffers = Math.min(maximumOffers, (MAX_ROUTE_EVENTS - heldEvents) / 3);
-        if (maximumOffers == 0) {
+        int maximumOffers = (MAX_ROUTE_EVENTS - heldEvents) / 3;
+        if (freeSlots + incompleteTasks == 0) {
             return best;
         }
-        List<CourierPlan> singles = new ArrayList<>();
-        for (CourierTask task : candidates(held, observedOffers, sailingLevel)) {
+        List<CourierTask> candidates = candidates(held, observedOffers, sailingLevel);
+        List<CourierTask> remaining =
+                retainedOffers.stream().filter(candidates::contains).collect(Collectors.toList());
+        if (!remaining.isEmpty()) {
+            CourierPlan continued = evaluate(start, boatPosition, held, remaining, freeSlots, tasksUntilReset);
+            if (continued.available) {
+                return continued;
+            }
+        }
+        List<CourierPlan> frontier = new ArrayList<>();
+        for (CourierTask task : candidates) {
             CourierPlan plan = evaluate(start, boatPosition, held, List.of(task), freeSlots, tasksUntilReset);
             if (!plan.available) {
                 continue;
             }
-            singles.add(plan);
+            frontier.add(plan);
             if (better(plan, best)) {
                 best = plan;
             }
         }
-        if (maximumOffers == 1) {
-            return best;
-        }
-        singles.sort(Comparator.comparingDouble((CourierPlan plan) -> plan.experiencePerHour)
+        Comparator<CourierPlan> ranking = Comparator.comparingDouble((CourierPlan plan) -> plan.experiencePerHour)
                 .reversed()
                 .thenComparing(Comparator.comparingInt((CourierPlan plan) -> plan.courierExperience)
-                        .reversed())
-                .thenComparingInt(plan -> plan.selectedOffers.get(0).board.ordinal())
-                .thenComparingInt(plan -> plan.selectedOffers.get(0).id));
-        int candidateCount = Math.min(MAX_BUNDLE_CANDIDATES, singles.size());
-        for (int mask = 1; mask < (1 << candidateCount); mask++) {
-            int size = Integer.bitCount(mask);
-            if (size < 2 || size > maximumOffers) {
-                continue;
-            }
-            List<CourierTask> offers = new ArrayList<>();
-            for (int index = 0; index < candidateCount; index++) {
-                if ((mask & (1 << index)) != 0) {
-                    offers.add(singles.get(index).selectedOffers.get(0));
+                        .reversed());
+        for (int size = 2; size <= maximumOffers; size++) {
+            List<CourierPlan> expanded = new ArrayList<>();
+            Set<Set<CourierTask>> visited = new HashSet<>();
+            for (CourierPlan partial : frontier) {
+                for (CourierTask task : candidates) {
+                    if (partial.selectedOffers.contains(task)) {
+                        continue;
+                    }
+                    List<CourierTask> offers = new ArrayList<>(partial.selectedOffers);
+                    offers.add(task);
+                    if (!visited.add(Set.copyOf(offers))) {
+                        continue;
+                    }
+                    CourierPlan plan = evaluate(start, boatPosition, held, offers, freeSlots, tasksUntilReset);
+                    if (!plan.available) {
+                        continue;
+                    }
+                    expanded.add(plan);
+                    if (better(plan, best)) {
+                        best = plan;
+                    }
                 }
             }
-            CourierPlan plan = evaluate(start, boatPosition, held, offers, freeSlots, tasksUntilReset);
-            if (better(plan, best)) {
-                best = plan;
-            }
+            expanded.sort(ranking);
+            frontier = expanded.subList(0, Math.min(BUNDLE_SEARCH_WIDTH, expanded.size()));
         }
         return best;
     }
@@ -130,12 +154,17 @@ public final class CourierCyclePlanner {
         List<CourierTask> candidates = new ArrayList<>();
         for (List<CourierTask> offers : observedOffers.values()) {
             for (CourierTask task : offers) {
-                if (task.experience < 0 || task.level > sailingLevel || !excludedIds.add(task.id)) {
+                if (task.delivery.noticeboardObject < 0
+                        || task.experience < 0
+                        || task.level > sailingLevel
+                        || !excludedIds.add(task.id)) {
                     continue;
                 }
                 candidates.add(task);
             }
         }
+        candidates.sort(Comparator.comparingInt((CourierTask task) -> task.board.ordinal())
+                .thenComparingInt(task -> task.id));
         return candidates;
     }
 

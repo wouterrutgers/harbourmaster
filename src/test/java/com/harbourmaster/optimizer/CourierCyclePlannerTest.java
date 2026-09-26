@@ -3,12 +3,17 @@ package com.harbourmaster.optimizer;
 import static com.harbourmaster.Fixtures.*;
 import static org.junit.Assert.*;
 
+import com.harbourmaster.data.PortGraph;
 import com.harbourmaster.model.ActiveTask;
 import com.harbourmaster.model.CourierPlan;
 import com.harbourmaster.model.CourierTask;
+import com.harbourmaster.model.Port;
 import com.harbourmaster.model.RouteEvent;
+import com.harbourmaster.model.RouteLeg;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.junit.Test;
@@ -76,12 +81,55 @@ public class CourierCyclePlannerTest {
     }
 
     @Test
-    public void bundleSizeNeverExceedsAvailableSlots() {
-        List<CourierTask> observed = List.of(courier(1, B, D, 500), courier(2, D, B, 500), courier(3, B, C, 500));
+    public void sequentialTasksReuseOneSlotWithoutAcceptingBeforeDelivery() {
+        CourierTask outward = courier(1, A, B, 500);
+        CourierTask onward = new CourierTask(2, 2, "Onward", 1, B, 102, "Cargo", 3, 1000, B, D);
+        CourierPlan plan = planner.plan(A, null, List.of(), Map.of(A, List.of(outward), B, List.of(onward)), 99, 1, 8);
 
-        CourierPlan plan = planner.plan(A, null, List.of(), Map.of(A, observed), 99, 1, 8);
+        assertEquals(Set.of(outward, onward), Set.copyOf(plan.selectedOffers));
+        int occupied = 0;
+        for (RouteEvent event :
+                plan.route.stops.stream().flatMap(stop -> stop.events.stream()).collect(Collectors.toList())) {
+            if (event.action == RouteEvent.Action.ACCEPT) {
+                occupied++;
+            }
+            if (event.action == RouteEvent.Action.DELIVER) {
+                occupied--;
+            }
+            assertTrue(occupied >= 0 && occupied <= 1);
+        }
+        assertEquals(0, occupied);
+    }
 
-        assertEquals(1, plan.selectedOffers.size());
+    @Test
+    public void sharedCrossingCanWinEvenWhenBothOffersFallOutsideTheTopFiveSingles() {
+        PortGraph graph = new PortGraph((from, to, size) -> Optional.of(new RouteLeg(
+                        null,
+                        null,
+                        (from.equals(A.navigationLocation)
+                                        ? 0
+                                        : from.equals(Port.LUNAR_ISLE.navigationLocation) ? 160 : 100)
+                                + (to.equals(A.navigationLocation)
+                                        ? 0
+                                        : to.equals(Port.LUNAR_ISLE.navigationLocation) ? 160 : 100),
+                        List.of(from, to))))
+                .detachedSnapshot(null);
+        List<CourierTask> offers = new ArrayList<>();
+        for (Port port : List.of(B, C, D, E, Port.PANDEMONIUM)) {
+            offers.add(courier(offers.size() + 1, A, port, 100));
+        }
+        CourierTask first = courier(6, A, Port.LUNAR_ISLE, 140);
+        CourierTask second = courier(7, A, Port.LUNAR_ISLE, 140);
+        offers.add(first);
+        offers.add(second);
+
+        CourierPlan plan = new CourierCyclePlanner(new RouteOptimizer(graph))
+                .plan(A, null, List.of(), Map.of(A, offers), 99, 2, 8);
+
+        assertEquals(Set.of(first, second), Set.copyOf(plan.selectedOffers));
+        assertEquals(
+                Set.of(first, second),
+                plan.route.nextActions().stream().map(event -> event.task).collect(Collectors.toSet()));
     }
 
     @Test
@@ -94,6 +142,21 @@ public class CourierCyclePlannerTest {
 
         assertTrue(plan.selectedOffers.isEmpty());
         assertEquals(10000, plan.courierExperience);
+    }
+
+    @Test
+    public void offersToPortsWithoutBoardsAreExcludedWhileHeldCargoStillGetsDelivered() {
+        CourierTask held = courier(1, A, Port.PISCATORIS, 1);
+        CourierTask noBoard = courier(2, A, Port.PISCATORIS, 1000000);
+        CourierTask boardDestination = courier(3, B, D, 1000);
+
+        CourierPlan plan =
+                planner.plan(A, null, List.of(loaded(held)), Map.of(A, List.of(noBoard, boardDestination)), 99, 1, 8);
+
+        assertEquals(List.of(boardDestination), plan.selectedOffers);
+        assertTrue(plan.route.stops.stream()
+                .flatMap(stop -> stop.events.stream())
+                .anyMatch(event -> event.task == held && event.action == RouteEvent.Action.DELIVER));
     }
 
     @Test

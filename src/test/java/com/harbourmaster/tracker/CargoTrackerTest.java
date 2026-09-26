@@ -7,6 +7,8 @@ import com.harbourmaster.model.ActiveTask;
 import com.harbourmaster.model.CourierTask;
 import com.harbourmaster.model.DockChecklist;
 import com.harbourmaster.model.RouteEvent;
+import com.harbourmaster.model.RoutePlan;
+import com.harbourmaster.optimizer.RouteOptimizer;
 import java.util.List;
 import java.util.Map;
 import org.junit.Test;
@@ -38,5 +40,25 @@ public class CargoTrackerTest {
         assertEquals(1, checklist.actions.get(0).quantity);
         assertEquals(RouteEvent.Action.DELIVER, checklist.actions.get(1).action);
         assertEquals(RouteEvent.Action.PICKUP, checklist.actions.get(2).action);
+    }
+
+    @Test
+    public void unloadingStopsAsSoonAsThereIsRoomToAcceptBeforeTheBoardReset() {
+        CourierTask first = courier(1, A, B, 100);
+        CourierTask second = courier(2, A, B, 100);
+        CourierTask offer = new CourierTask(3, 3, "Return task", 1, B, 103, "Cargo", 3, 1000, A, B);
+        List<ActiveTask> held = List.of(loaded(first), loaded(second));
+        RoutePlan route = new RouteOptimizer(line()).optimizeWithOffers(B, null, held, List.of(offer), 0, 2);
+        DockChecklist dock = DockChecklist.at(B, held).follow(route);
+
+        assertEquals(1, dock.actions.size());
+        assertTrue(dock.unloads(first.itemId) != dock.unloads(second.itemId));
+        CourierTask remaining = dock.unloads(first.itemId) ? second : first;
+        held = List.of(loaded(remaining));
+        route = new RouteOptimizer(line()).optimizeWithOffers(B, null, held, List.of(offer), 1, 1);
+        dock = DockChecklist.at(B, held).follow(route);
+
+        assertTrue(dock.hasAcceptance());
+        assertFalse(dock.unloads(remaining.itemId));
     }
 }

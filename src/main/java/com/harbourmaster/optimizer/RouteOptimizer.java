@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CancellationException;
 import net.runelite.api.coords.WorldPoint;
 
 public final class RouteOptimizer {
@@ -49,7 +50,7 @@ public final class RouteOptimizer {
             int tasksUntilReset,
             Port firstStop) {
         List<RouteEvent> events = new ArrayList<>();
-        List<Integer> prerequisites = new ArrayList<>();
+        List<Integer> taskLengths = new ArrayList<>();
         for (ActiveTask active : held) {
             if (active.definition == null) {
                 return RoutePlan.unavailable("Unrecognized active task " + active.taskId);
@@ -58,38 +59,34 @@ public final class RouteOptimizer {
                 continue;
             }
             CourierTask task = active.definition;
-            int pickupMask = 0;
             if (active.pickupRemaining() > 0) {
-                pickupMask = 1 << events.size();
                 events.add(new RouteEvent(
                         active.slot, task, RouteEvent.Action.PICKUP, task.pickup, active.pickupRemaining()));
-                prerequisites.add(0);
             }
             events.add(new RouteEvent(
                     active.slot, task, RouteEvent.Action.DELIVER, task.delivery, active.deliveryRemaining()));
-            prerequisites.add(pickupMask);
+            taskLengths.add(active.pickupRemaining() > 0 ? 2 : 1);
         }
         for (CourierTask task : offers) {
-            int acceptance = 1 << events.size();
             events.add(new RouteEvent(-1, task, RouteEvent.Action.ACCEPT, task.board, 0));
-            prerequisites.add(0);
-            int pickup = 1 << events.size();
             events.add(new RouteEvent(-1, task, RouteEvent.Action.PICKUP, task.pickup, task.quantity));
-            prerequisites.add(acceptance);
             events.add(new RouteEvent(-1, task, RouteEvent.Action.DELIVER, task.delivery, task.quantity));
-            prerequisites.add(pickup);
+            taskLengths.add(3);
         }
-        return optimize(start, boatPosition, events, prerequisites, firstStop, freeSlots, tasksUntilReset);
+        return optimize(start, boatPosition, events, taskLengths, firstStop, freeSlots, tasksUntilReset);
     }
 
     private RoutePlan optimize(
             Port start,
             WorldPoint boatPosition,
             List<RouteEvent> events,
-            List<Integer> prerequisites,
+            List<Integer> taskLengths,
             Port firstStop,
             int freeSlots,
             int tasksUntilReset) {
+        if (Thread.currentThread().isInterrupted()) {
+            throw new CancellationException("Courier plan cancelled");
+        }
         if (events.isEmpty()) {
             return RoutePlan.empty();
         }
@@ -97,7 +94,17 @@ public final class RouteOptimizer {
             return RoutePlan.unavailable("Visit a known port to establish the route start");
         }
         int count = events.size();
-        int complete = (1 << count) - 1;
+        int[] increments = new int[count];
+        int[] offsets = new int[taskLengths.size()];
+        int stateCount = 1;
+        int offset = 0;
+        for (int task = 0; task < taskLengths.size(); task++) {
+            offsets[task] = offset;
+            int length = taskLengths.get(task);
+            Arrays.fill(increments, offset, offset + length, stateCount);
+            stateCount *= length + 1;
+            offset += length;
+        }
         RouteLeg[][] journeys = new RouteLeg[count + 1][count];
         for (int destination = 0; destination < count; destination++) {
             journeys[count][destination] = journey(start, boatPosition, events.get(destination).port);
@@ -106,70 +113,63 @@ public final class RouteOptimizer {
                         .orElse(null);
             }
         }
-        double[][] distances = new double[complete + 1][count];
-        int[][] parents = new int[complete + 1][count];
-        int[][] sailings = new int[complete + 1][count];
-        for (int mask = 0; mask <= complete; mask++) {
-            Arrays.fill(distances[mask], Double.POSITIVE_INFINITY);
-            Arrays.fill(parents[mask], -1);
-        }
-        int acceptances = 0;
-        int deliveries = 0;
-        for (int event = 0; event < count; event++) {
-            if (events.get(event).action == RouteEvent.Action.ACCEPT) {
-                acceptances |= 1 << event;
+        int positions = count + 1;
+        double[] times = new double[stateCount * positions];
+        int[] parents = new int[times.length];
+        Arrays.fill(times, Double.POSITIVE_INFINITY);
+        Arrays.fill(parents, -1);
+        times[count] = 0;
+        for (int state = 0; state < stateCount; state++) {
+            if (Thread.currentThread().isInterrupted()) {
+                throw new CancellationException("Courier plan cancelled");
             }
-            if (events.get(event).action == RouteEvent.Action.DELIVER) {
-                deliveries |= 1 << event;
+            int completedTasks = 0;
+            int availableSlots = freeSlots;
+            for (int task = 0; task < taskLengths.size(); task++) {
+                int progress = state / increments[offsets[task]] % (taskLengths.get(task) + 1);
+                if (progress == taskLengths.get(task)) {
+                    completedTasks++;
+                    availableSlots++;
+                }
+                if (progress > 0 && events.get(offsets[task]).action == RouteEvent.Action.ACCEPT) {
+                    availableSlots--;
+                }
             }
-        }
-        for (int event = 0; event < count; event++) {
-            RouteLeg journey = journeys[count][event];
-            if (prerequisites.get(event) == 0
-                    && journey != null
-                    && (events.get(event).action != RouteEvent.Action.ACCEPT || freeSlots > 0 && tasksUntilReset > 0)
-                    && (firstStop == null || events.get(event).port == firstStop)) {
-                distances[1 << event][event] = journey.distance;
-                sailings[1 << event][event] = journey.from == journey.to ? 0 : 1;
-            }
-        }
-        for (int visited = 1; visited <= complete; visited++) {
-            int completedTasks = Integer.bitCount(visited & deliveries);
-            int availableSlots = freeSlots + completedTasks - Integer.bitCount(visited & acceptances);
-            for (int previous = 0; previous < count; previous++) {
-                if (!Double.isFinite(distances[visited][previous])) {
+            for (int task = 0; task < taskLengths.size(); task++) {
+                int progress = state / increments[offsets[task]] % (taskLengths.get(task) + 1);
+                if (progress == taskLengths.get(task)) {
                     continue;
                 }
-                for (int next = 0; next < count; next++) {
-                    int bit = 1 << next;
+                int next = offsets[task] + progress;
+                RouteEvent event = events.get(next);
+                if (event.action == RouteEvent.Action.ACCEPT
+                        && (availableSlots == 0 || completedTasks >= tasksUntilReset)) {
+                    continue;
+                }
+                if (state == 0 && firstStop != null && event.port != firstStop) {
+                    continue;
+                }
+                int combined = (state + increments[next]) * positions + next;
+                for (int previous = 0; previous < positions; previous++) {
+                    double elapsed = times[state * positions + previous];
                     RouteLeg journey = journeys[previous][next];
-                    if ((visited & bit) != 0
-                            || (visited & prerequisites.get(next)) != prerequisites.get(next)
-                            || (events.get(next).action == RouteEvent.Action.ACCEPT
-                                    && (availableSlots == 0 || completedTasks >= tasksUntilReset))
-                            || journey == null) {
+                    if (!Double.isFinite(elapsed) || journey == null) {
                         continue;
                     }
-                    int combined = visited | bit;
-                    double distance = distances[visited][previous] + journey.distance;
-                    int sailCount = sailings[visited][previous] + (journey.from == journey.to ? 0 : 1);
-                    if (better(distance, sailCount, distances[combined][next], sailings[combined][next])) {
-                        distances[combined][next] = distance;
-                        sailings[combined][next] = sailCount;
-                        parents[combined][next] = previous;
+                    double time = elapsed + CourierTimeModel.travelTicks(journey);
+                    if (time < times[combined] - EPSILON) {
+                        times[combined] = time;
+                        parents[combined] = previous;
                     }
                 }
             }
         }
+        int complete = stateCount - 1;
         int last = -1;
         for (int event = 0; event < count; event++) {
-            if (Double.isFinite(distances[complete][event])
+            if (Double.isFinite(times[complete * positions + event])
                     && (last < 0
-                            || better(
-                                    distances[complete][event],
-                                    sailings[complete][event],
-                                    distances[complete][last],
-                                    sailings[complete][last]))) {
+                            || times[complete * positions + event] < times[complete * positions + last] - EPSILON)) {
                 last = event;
             }
         }
@@ -177,12 +177,11 @@ public final class RouteOptimizer {
             return RoutePlan.unavailable("Route unavailable: unknown or disconnected port");
         }
 
-        double distance = distances[complete][last];
         List<RouteEvent> ordered = new ArrayList<>();
-        for (int remaining = complete; last >= 0; ) {
+        for (int state = complete; state > 0; ) {
             ordered.add(events.get(last));
-            int parent = parents[remaining][last];
-            remaining ^= 1 << last;
+            int parent = parents[state * positions + last];
+            state -= increments[last];
             last = parent;
         }
         Collections.reverse(ordered);
@@ -202,11 +201,18 @@ public final class RouteOptimizer {
                 stops.add(new RouteStop(event.port, List.of(event)));
             } else {
                 List<RouteEvent> grouped = new ArrayList<>(stops.remove(stops.size() - 1).events);
-                grouped.add(event);
+                int positionInStop = grouped.size();
+                if (event.action == RouteEvent.Action.ACCEPT) {
+                    while (positionInStop > 0 && grouped.get(positionInStop - 1).action == RouteEvent.Action.PICKUP) {
+                        positionInStop--;
+                    }
+                }
+                grouped.add(positionInStop, event);
                 stops.add(new RouteStop(event.port, grouped));
             }
         }
-        return new RoutePlan(true, "", distance, legs, stops);
+        return new RoutePlan(
+                true, "", legs.stream().mapToDouble(leg -> leg.distance).sum(), legs, stops);
     }
 
     public RoutePlan relocate(RoutePlan plan, Port start, WorldPoint boatPosition) {
@@ -235,10 +241,5 @@ public final class RouteOptimizer {
                         ? graph.route(start, destination)
                         : graph.routeFromPosition(boatPosition, destination))
                 .orElse(null);
-    }
-
-    private static boolean better(double distance, int sailings, double existingDistance, int existingSailings) {
-        return distance < existingDistance - EPSILON
-                || (Math.abs(distance - existingDistance) < EPSILON && sailings < existingSailings);
     }
 }

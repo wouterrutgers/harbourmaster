@@ -81,7 +81,10 @@ public final class DockOverlay extends Overlay {
                                             : "Gangplank to " + state.dock.port.name));
                 }
             }
-            if (port != null && object.getId() == port.noticeboardObject && config.highlightNoticeboards()) {
+            if (port != null
+                    && object.getId() == port.noticeboardObject
+                    && config.highlightNoticeboards()
+                    && (state.route.stops.isEmpty() || port == state.dock.port && state.dock.hasAcceptance())) {
                 if (state.freeSlots > 0 || config.subdueFullBoards()) {
                     draw(
                             graphics,
@@ -91,6 +94,7 @@ public final class DockOverlay extends Overlay {
                 }
             }
             if (!state.dock.actions.isEmpty()
+                    && !state.dock.hasAcceptance()
                     && port == state.dock.port
                     && object.getId() == port.ledgerObject
                     && config.highlightLedger()) {
@@ -102,7 +106,7 @@ public final class DockOverlay extends Overlay {
                 draw(graphics, object, state.dock.hasUnload() ? config.unloadColor() : config.loadColor(), lines);
             }
             if (config.highlightCargoHold()
-                    && (state.depositCargo || !state.dock.actions.isEmpty())
+                    && (state.depositCargo || !state.dock.actions.isEmpty() && !state.dock.hasAcceptance())
                     && CargoHoldObjects.IDS.contains(object.getId())
                     && !object.getWorldView().isTopLevel()
                     && object.getWorldView() == playerWorld) {

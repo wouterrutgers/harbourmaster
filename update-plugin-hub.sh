@@ -1,8 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
+cd "$(dirname "$0")"
+
 commit="$(git rev-parse HEAD)"
-version="$(sed -n 's/^version=//p' runelite-plugin.properties)"
+version="$(git show "$commit:runelite-plugin.properties" | sed -n 's/^version=//p')"
 
 cd "../plugin-hub"
 

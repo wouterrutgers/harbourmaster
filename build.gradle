@@ -1,6 +1,6 @@
 plugins {
     id 'java'
-    id 'com.diffplug.spotless' version '7.+'
+    id 'com.diffplug.spotless' version '7.2.1'
 }
 
 repositories {
@@ -102,6 +102,10 @@ java {
 
 tasks.named('test') {
     systemProperty 'java.awt.headless', 'true'
+}
+
+tasks.named('check') {
+    dependsOn tasks.named('generatorClasses')
 }
 
 tasks.register('generateRoutes', JavaExec) {

@@ -3,11 +3,8 @@ package com.harbourmaster;
 import static com.harbourmaster.Fixtures.*;
 import static org.junit.Assert.*;
 
-import com.harbourmaster.data.BoatSize;
 import com.harbourmaster.data.PortGraph;
 import com.harbourmaster.data.PortTaskCatalog;
-import com.harbourmaster.data.SailingRouter;
-import com.harbourmaster.data.SailingSearch;
 import com.harbourmaster.model.CourierTask;
 import com.harbourmaster.model.RouteEvent;
 import com.harbourmaster.model.RouteLeg;
@@ -22,11 +19,14 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import net.runelite.api.Client;
+import net.runelite.api.GameObject;
 import net.runelite.api.GameState;
 import net.runelite.api.IndexedObjectSet;
 import net.runelite.api.Player;
@@ -50,6 +50,9 @@ public class HarbourmasterPluginTest {
     private WorldPoint location = A.navigationLocation;
     private WorldPoint blockedPosition;
     private boolean aboard;
+    private WorldPoint stalledPosition;
+    private final CountDownLatch searchStarted = new CountDownLatch(1);
+    private final CountDownLatch searchCancelled = new CountDownLatch(1);
     private int routeSearches;
     private final WorldView boat = ApiStub.of(WorldView.class, (method, arguments) -> {
         switch (method) {
@@ -134,38 +137,24 @@ public class HarbourmasterPluginTest {
 
     @Before
     public void initialize() throws ReflectiveOperationException {
-        PortGraph graph = new PortGraph(new SailingRouter() {
-            @Override
-            public Optional<RouteLeg> route(WorldPoint from, WorldPoint to, BoatSize size) {
-                throw new AssertionError("Use incremental searches");
+        PortGraph graph = new PortGraph((from, to, size) -> {
+            routeSearches++;
+            if (from.equals(stalledPosition)) {
+                searchStarted.countDown();
+                try {
+                    new CountDownLatch(1).await();
+                    throw new AssertionError("Obsolete search must be cancelled");
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    searchCancelled.countDown();
+                    throw new CancellationException();
+                }
             }
-
-            @Override
-            public SailingSearch search(WorldPoint from, WorldPoint to, BoatSize size) {
-                routeSearches++;
-                return new SailingSearch() {
-                    private int advances;
-
-                    @Override
-                    public boolean advance(int maximumExpandedStates) {
-                        return ++advances >= 2;
-                    }
-
-                    @Override
-                    public int expandedStates() {
-                        return advances;
-                    }
-
-                    @Override
-                    public Optional<RouteLeg> result() {
-                        if (from.equals(blockedPosition)) {
-                            return Optional.empty();
-                        }
-                        return Optional.of(new RouteLeg(
-                                null, null, from.distanceTo(to), from.equals(to) ? List.of(from) : List.of(from, to)));
-                    }
-                };
+            if (from.equals(blockedPosition)) {
+                return Optional.empty();
             }
+            return Optional.of(
+                    new RouteLeg(null, null, from.distanceTo(to), from.equals(to) ? List.of(from) : List.of(from, to)));
         });
         RouteOptimizer optimizer = new RouteOptimizer(graph);
         PortTaskCatalog catalog = new PortTaskCatalog();
@@ -277,6 +266,33 @@ public class HarbourmasterPluginTest {
         assertEquals(
                 RouteEvent.Action.ACCEPT,
                 plugin.getSnapshot().route.stops.get(0).events.get(0).action);
+
+        location = B.navigationLocation;
+        plugin.getPorts().add(ApiStub.of(GameObject.class, (method, arguments) -> {
+            switch (method) {
+                case "getId":
+                    return B.ledgerObject;
+                case "getWorldView":
+                    return world;
+                case "getLocalLocation":
+                    return new LocalPoint(64, 64, WorldView.TOPLEVEL);
+                default:
+                    throw new AssertionError(method);
+            }
+        }));
+        plugin.onGameTick(new GameTick());
+        publishPlan();
+
+        assertTrue(plugin.getSnapshot().recommends(task));
+        assertTrue(plugin.getSnapshot().dock.hasAcceptance());
+        assertFalse(plugin.getSnapshot().dock.hasUnload());
+
+        CourierTask betterOffer = new CourierTask(3, 3, "Better offer", 1, B, 103, "Cargo", 3, 10000, B, D);
+        ((OfferCycleTracker) field(plugin, "offerCycles").get(plugin)).observe(7, List.of(task, betterOffer));
+        plugin.onGameTick(new GameTick());
+        publishPlan();
+
+        assertEquals(List.of(betterOffer), plugin.getSnapshot().courierPlan.selectedOffers);
     }
 
     @Test
@@ -312,6 +328,29 @@ public class HarbourmasterPluginTest {
         assertEquals(location, plugin.getSnapshot().navigation.get(0).points.get(0).tile);
         assertEquals(Math.hypot(5, 1), plugin.getSnapshot().currentLeg.distance, 0.00001);
         assertEquals(searchesBeforeFollowingRoute, routeSearches);
+    }
+
+    @Test
+    public void returningToPortCancelsThePreviousSailingCalculation() throws InterruptedException {
+        plugin.getPorts().update(client, B);
+        aboard = true;
+        location = new WorldPoint(3000, 3100, 0);
+        stalledPosition = location;
+        varbits.put(TaskVarbits.IDS[0], task.id);
+        plugin.onGameTick(new GameTick());
+        assertTrue(searchStarted.await(5, TimeUnit.SECONDS));
+
+        aboard = false;
+        location = B.navigationLocation;
+        plugin.getPorts().update(client, B);
+        plugin.onGameTick(new GameTick());
+        assertTrue(searchCancelled.await(5, TimeUnit.SECONDS));
+        publishPlan();
+
+        assertTrue(plugin.getSnapshot().route.available);
+        assertFalse(plugin.isCalculatingPlan());
+        assertEquals(B, plugin.getSnapshot().route.stops.get(0).port);
+        assertTrue(callbacks.isEmpty());
     }
 
     private void publishPlan() throws InterruptedException {

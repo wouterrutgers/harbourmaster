@@ -19,9 +19,10 @@ public class PortGraphTest {
         List<BoatSize> searches = new ArrayList<>();
         WorldPoint bend = new WorldPoint(3000, 3120, 0);
         PortGraph graph = new PortGraph((from, to, boatSize) -> {
-            searches.add(boatSize);
-            return Optional.of(new RouteLeg(null, null, 120, List.of(from, bend, to)));
-        });
+                    searches.add(boatSize);
+                    return Optional.of(new RouteLeg(null, null, 120, List.of(from, bend, to)));
+                })
+                .detachedSnapshot(null);
 
         RouteLeg outward = graph.route(Port.PORT_SARIM, Port.MUSA_POINT).orElseThrow(AssertionError::new);
         RouteLeg returning = graph.route(Port.MUSA_POINT, Port.PORT_SARIM).orElseThrow(AssertionError::new);
@@ -72,8 +73,9 @@ public class PortGraphTest {
         WorldPoint blocked = new WorldPoint(3000, 3100, 0);
         WorldPoint reachable = new WorldPoint(3001, 3100, 0);
         PortGraph graph = new PortGraph((from, to, boatSize) -> from.equals(blocked)
-                ? Optional.empty()
-                : Optional.of(new RouteLeg(null, null, from.distanceTo(to), List.of(from, to))));
+                        ? Optional.empty()
+                        : Optional.of(new RouteLeg(null, null, from.distanceTo(to), List.of(from, to))))
+                .detachedSnapshot(null);
 
         assertFalse(graph.routeFromPosition(blocked, Port.MUSA_POINT).isPresent());
         RouteLeg route = graph.routeFromPosition(reachable, Port.MUSA_POINT).orElseThrow(AssertionError::new);
@@ -86,9 +88,10 @@ public class PortGraphTest {
     public void changingBoatSizeRecalculatesCachedRoutes() {
         List<BoatSize> routedSizes = new ArrayList<>();
         PortGraph graph = new PortGraph((from, to, boatSize) -> {
-            routedSizes.add(boatSize);
-            return Optional.of(new RouteLeg(null, null, 1, List.of(from, to)));
-        });
+                    routedSizes.add(boatSize);
+                    return Optional.of(new RouteLeg(null, null, 1, List.of(from, to)));
+                })
+                .detachedSnapshot(null);
 
         graph.route(Port.PORT_SARIM, Port.MUSA_POINT);
         assertEquals(List.of(BoatSize.SLOOP), routedSizes);
@@ -104,9 +107,10 @@ public class PortGraphTest {
         Port destination = Port.MUSA_POINT;
         WorldPoint end = destination.navigationLocation;
         PortGraph graph = new PortGraph((from, to, boatSize) -> {
-            routeSearches[0]++;
-            return Optional.of(new RouteLeg(null, null, from.distanceTo(to), List.of(from, to)));
-        });
+                    routeSearches[0]++;
+                    return Optional.of(new RouteLeg(null, null, from.distanceTo(to), List.of(from, to)));
+                })
+                .detachedSnapshot(null);
         WorldPoint start = new WorldPoint(end.getX() - 10, end.getY(), 0);
         WorldPoint current = new WorldPoint(end.getX() - 5, end.getY(), 0);
 
@@ -125,9 +129,10 @@ public class PortGraphTest {
         WorldPoint destination = Port.MUSA_POINT.navigationLocation;
         WorldPoint approach = new WorldPoint(destination.getX() - 10, destination.getY(), 0);
         PortGraph graph = new PortGraph((from, to, boatSize) -> {
-            searches[0]++;
-            return Optional.of(new RouteLeg(null, null, 100, List.of(from, approach, to)));
-        });
+                    searches[0]++;
+                    return Optional.of(new RouteLeg(null, null, 100, List.of(from, approach, to)));
+                })
+                .detachedSnapshot(null);
         graph.route(Port.PORT_SARIM, Port.MUSA_POINT);
 
         WorldPoint position = new WorldPoint(destination.getX() - 5, destination.getY(), 0);
@@ -147,8 +152,10 @@ public class PortGraphTest {
         });
         WorldPoint position = Port.PORT_SARIM.navigationLocation;
 
-        graph.route(Port.PORT_SARIM, Port.MUSA_POINT);
-        graph.routeFromPosition(position, Port.MUSA_POINT);
+        PortGraph initial = graph.detachedSnapshot(position);
+        initial.route(Port.PORT_SARIM, Port.MUSA_POINT);
+        initial.routeFromPosition(position, Port.MUSA_POINT);
+        graph.mergeComputedRoutes(initial);
         PortGraph detached = graph.detachedSnapshot(position);
         int searchesBeforeDetachedLookups = routeSearches[0];
 
@@ -168,56 +175,33 @@ public class PortGraphTest {
         PortGraph graph = new PortGraph(
                 (from, to, boatSize) -> Optional.of(new RouteLeg(null, null, from.distanceTo(to), List.of(from, to))));
 
-        graph.route(Port.PORT_SARIM, Port.MUSA_POINT);
-
         assertTrue(graph.detachedSnapshot(null)
                 .route(Port.PORT_SARIM, Port.MUSA_POINT)
                 .isPresent());
     }
 
     @Test
-    public void livePortRoutesContinueInSmallSearchSlices() {
-        int[] advances = {0};
-        SailingRouter router = new SailingRouter() {
-            @Override
-            public Optional<RouteLeg> route(WorldPoint from, WorldPoint to, BoatSize boatSize) {
-                throw new AssertionError("The live graph must not run a full route synchronously");
-            }
-
-            @Override
-            public SailingSearch search(WorldPoint from, WorldPoint to, BoatSize boatSize) {
-                return new SailingSearch() {
-                    private Optional<RouteLeg> result;
-
-                    @Override
-                    public boolean advance(int maximumExpandedStates) {
-                        advances[0]++;
-                        if (advances[0] == 3) {
-                            result = Optional.of(new RouteLeg(null, null, 1, List.of(from, to)));
-                        }
-                        return result != null;
-                    }
-
-                    @Override
-                    public Optional<RouteLeg> result() {
-                        return result;
-                    }
-
-                    @Override
-                    public int expandedStates() {
-                        return advances[0];
-                    }
-                };
-            }
-        };
-        PortGraph graph = new PortGraph(router);
+    public void liveRoutesLeaveUncachedSearchesToTheBackgroundPlanner() {
+        int[] searches = {0};
+        PortGraph graph = new PortGraph((from, to, boatSize) -> {
+            searches[0]++;
+            return Optional.of(new RouteLeg(null, null, from.distanceTo(to), List.of(from, to)));
+        });
+        WorldPoint position = new WorldPoint(3000, 3100, 0);
 
         assertFalse(graph.route(Port.PORT_SARIM, Port.MUSA_POINT).isPresent());
-        assertTrue(graph.hasPendingRouteSearches());
-        graph.advanceRouteSearches(100_000_000);
+        assertFalse(graph.routeFromPosition(position, Port.CATHERBY).isPresent());
+        assertEquals(0, searches[0]);
+        assertTrue(graph.hasMissingRoutes());
+
+        PortGraph detached = graph.detachedSnapshot(position);
+        detached.route(Port.PORT_SARIM, Port.MUSA_POINT);
+        detached.routeFromPosition(position, Port.CATHERBY);
+        graph.mergeComputedRoutes(detached);
 
         assertTrue(graph.route(Port.PORT_SARIM, Port.MUSA_POINT).isPresent());
-        assertFalse(graph.hasPendingRouteSearches());
-        assertEquals(3, advances[0]);
+        assertTrue(graph.routeFromPosition(position, Port.CATHERBY).isPresent());
+        assertFalse(graph.hasMissingRoutes());
+        assertEquals(2, searches[0]);
     }
 }

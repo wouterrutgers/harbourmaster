@@ -8,7 +8,6 @@ import com.harbourmaster.model.HarbourmasterSnapshot;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Dimension;
-import java.awt.FontMetrics;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
 import java.util.Locale;
@@ -53,11 +52,7 @@ public final class NoticeboardOverlay extends Overlay {
                 || !openingDetails && !boardVisible) {
             return null;
         }
-        if (boardVisible && plugin.isCalculatingPlan()) {
-            renderCalculating(graphics);
-            return null;
-        }
-        if (!config.rankOffers() || !state.boardOpen) {
+        if (!config.rankOffers() || !state.boardOpen || plugin.isCalculatingPlan()) {
             return null;
         }
         Graphics2D drawing = (Graphics2D) graphics.create();
@@ -70,18 +65,19 @@ public final class NoticeboardOverlay extends Overlay {
                 continue;
             }
             Rectangle bounds = widget.getBounds();
-            if (selected(state.courierPlan, task)) {
+            if (state.recommends(task)) {
                 drawing.draw(bounds);
             }
             if (!openingDetails && bounds.contains(mouse.getX(), mouse.getY())) {
                 tooltips.add(new Tooltip(details(task, state.courierPlan)));
             }
         }
-        if (!openingDetails
-                && plugin.getNoticeboard().getOffers().stream().noneMatch(task -> selected(state.courierPlan, task))) {
-            String message = state.courierPlan == null || state.courierPlan.selectedOffers.isEmpty()
-                    ? "No offer is selected for the current courier plan"
-                    : "The recommended task is at another board";
+        if (!openingDetails && plugin.getNoticeboard().getOffers().stream().noneMatch(state::recommends)) {
+            String message = state.route.stops.isEmpty()
+                    ? "No suitable courier offers"
+                    : state.nextPort() == plugin.getNoticeboard().getPort()
+                            ? "Close the board and complete the dock actions"
+                            : "Continue to " + state.nextPort().name;
             Rectangle bounds = client.getWidget(InterfaceID.PortTaskBoard.FRAME).getBounds();
             drawing.setFont(FontManager.getRunescapeSmallFont());
             OverlayUtil.renderTextLocation(
@@ -94,22 +90,6 @@ public final class NoticeboardOverlay extends Overlay {
         }
         drawing.dispose();
         return null;
-    }
-
-    private void renderCalculating(Graphics2D graphics) {
-        Rectangle bounds = client.getWidget(InterfaceID.PortTaskBoard.FRAME).getBounds();
-        Graphics2D drawing = (Graphics2D) graphics.create();
-        drawing.setColor(new Color(0, 0, 0, 153));
-        drawing.fill(bounds);
-        drawing.setFont(FontManager.getRunescapeSmallFont());
-        FontMetrics fontMetrics = drawing.getFontMetrics();
-        int y = bounds.y + bounds.height / 2 - fontMetrics.getHeight() + fontMetrics.getAscent();
-        drawing.setColor(Color.WHITE);
-        for (String message : new String[] {"Calculating route...", "Choosing tasks for your route..."}) {
-            drawing.drawString(message, bounds.x + (bounds.width - fontMetrics.stringWidth(message)) / 2, y);
-            y += fontMetrics.getHeight();
-        }
-        drawing.dispose();
     }
 
     private boolean visible(int component) {

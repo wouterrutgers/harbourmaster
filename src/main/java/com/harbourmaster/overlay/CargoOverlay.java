@@ -2,6 +2,7 @@ package com.harbourmaster.overlay;
 
 import com.harbourmaster.HarbourmasterConfig;
 import com.harbourmaster.HarbourmasterPlugin;
+import com.harbourmaster.model.HarbourmasterSnapshot;
 import com.harbourmaster.tracker.CargoTracker;
 import java.awt.Color;
 import java.awt.Graphics2D;
@@ -42,12 +43,13 @@ public final class CargoOverlay extends WidgetItemOverlay {
 
     @Override
     public void renderItemOverlay(Graphics2D graphics, int itemId, WidgetItem item) {
-        CargoTracker.Destination destination = plugin.getSnapshot().cargo.get(itemId);
+        HarbourmasterSnapshot state = plugin.getSnapshot();
+        CargoTracker.Destination destination = state.cargo.get(itemId);
         if (destination == null) {
             return;
         }
         Rectangle bounds = item.getCanvasBounds();
-        boolean unload = destination.unload && config.highlightUnloadCrates();
+        boolean unload = state.dock.unloads(itemId) && config.highlightUnloadCrates();
         if (unload) {
             graphics.drawImage(
                     items.getItemOutline(itemId, item.getQuantity(), config.unloadColor()), bounds.x, bounds.y, null);

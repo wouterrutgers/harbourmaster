@@ -70,7 +70,6 @@ public class DockOverlayTest {
             return new HarbourmasterSnapshot(
                     true,
                     RoutePlan.empty(),
-                    List.of(),
                     false,
                     4,
                     DockChecklist.at(dock, tasks),

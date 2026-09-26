@@ -31,8 +31,10 @@ import com.harbourmaster.tracker.RouteTracker;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import javax.inject.Inject;
 import net.runelite.api.Client;
 import net.runelite.api.GameState;
@@ -115,7 +117,9 @@ public class HarbourmasterPlugin extends Plugin {
     private List<Object> previousInputs;
     private List<Object> previousPlanInputs;
     private CourierPlan previousCourierPlan;
+    private CourierPlanRequest previousPlanRequest;
     private ExecutorService plannerExecutor;
+    private Future<?> planningTask;
     private volatile boolean optimizerInitializing;
     private volatile CourierPlanRequest pendingPlanRequest;
 
@@ -228,12 +232,17 @@ public class HarbourmasterPlugin extends Plugin {
 
     private void clearPlan() {
         pendingPlanRequest = null;
+        if (planningTask != null) {
+            planningTask.cancel(true);
+            planningTask = null;
+        }
         if (routeTracker != null) {
-            portGraph.clearPendingRouteSearches();
+            portGraph.clearMissingRoutes();
             routeTracker.clear();
         }
         previousPlanInputs = null;
         previousCourierPlan = null;
+        previousPlanRequest = null;
     }
 
     private void refresh() {
@@ -298,7 +307,6 @@ public class HarbourmasterPlugin extends Plugin {
         snapshot = new HarbourmasterSnapshot(
                 true,
                 route,
-                noticeboard.getOffers(),
                 noticeboard.isOpen(),
                 freeSlots,
                 DockChecklist.at(ports.getDock(), held),
@@ -322,7 +330,10 @@ public class HarbourmasterPlugin extends Plugin {
                 ports.getBoatSize(),
                 config.rankOffers(),
                 tasksUntilReset);
-        if (!inputs.equals(previousPlanInputs)) {
+        if (!inputs.equals(previousPlanInputs)
+                || pendingPlanRequest != null
+                        && pendingPlanRequest.boatPosition != null
+                        && ports.getBoatPosition() == null) {
             previousPlanInputs = inputs;
             requestPlan(held, observedOffers, level, freeSlots, tasksUntilReset, null);
         }
@@ -334,8 +345,8 @@ public class HarbourmasterPlugin extends Plugin {
                 ? cyclePlanner.withRoute(
                         previousCourierPlan, routeTracker.update(ports.getStart(), ports.getBoatPosition(), held))
                 : cyclePlanner.relocate(previousCourierPlan, ports.getStart(), ports.getBoatPosition());
-        if (portGraph.hasPendingRouteSearches()) {
-            portGraph.clearPendingRouteSearches();
+        if (portGraph.hasMissingRoutes()) {
+            portGraph.clearMissingRoutes();
             requestPlan(
                     held,
                     observedOffers,
@@ -392,10 +403,14 @@ public class HarbourmasterPlugin extends Plugin {
                 level,
                 freeSlots,
                 tasksUntilReset,
-                routeToUpdate);
+                routeToUpdate,
+                config.rankOffers() ? retainedOffers(held, observedOffers, level) : List.of());
+        if (planningTask != null) {
+            planningTask.cancel(true);
+        }
         pendingPlanRequest = request;
         PortGraph routeSnapshot = portGraph.detachedSnapshot(request.boatPosition);
-        plannerExecutor.execute(() -> {
+        planningTask = plannerExecutor.submit(() -> {
             try {
                 CourierCyclePlanner planner = new CourierCyclePlanner(new RouteOptimizer(routeSnapshot));
                 CourierPlan plan = request.routeToUpdate == null
@@ -406,13 +421,38 @@ public class HarbourmasterPlugin extends Plugin {
                                 request.observedOffers,
                                 request.sailingLevel,
                                 request.freeSlots,
-                                request.tasksUntilReset)
+                                request.tasksUntilReset,
+                                request.retainedOffers)
                         : planner.relocate(request.routeToUpdate, request.start, request.boatPosition);
                 clientThread.invokeLater(() -> publishPlan(request, routeSnapshot, plan));
+            } catch (CancellationException ignored) {
+                // A newer request or clearing the plan cancelled this calculation.
             } catch (RuntimeException exception) {
                 clientThread.invokeLater(() -> failPlan(request, exception));
             }
         });
+    }
+
+    private List<CourierTask> retainedOffers(
+            List<ActiveTask> held, Map<Port, List<CourierTask>> observedOffers, int level) {
+        if (previousPlanRequest == null || previousCourierPlan == null || previousPlanRequest.sailingLevel != level) {
+            return List.of();
+        }
+        for (Map.Entry<Port, List<CourierTask>> board : observedOffers.entrySet()) {
+            if (!previousPlanRequest
+                    .observedOffers
+                    .getOrDefault(board.getKey(), List.of())
+                    .containsAll(board.getValue())) {
+                return List.of();
+            }
+        }
+        for (ActiveTask task : held) {
+            if (previousPlanRequest.held.stream().noneMatch(previous -> previous.taskId == task.taskId)
+                    && previousCourierPlan.selectedOffers.stream().noneMatch(offer -> offer.id == task.taskId)) {
+                return List.of();
+            }
+        }
+        return previousCourierPlan.selectedOffers;
     }
 
     private void publishPlan(CourierPlanRequest request, PortGraph routeSnapshot, CourierPlan plan) {
@@ -425,6 +465,7 @@ public class HarbourmasterPlugin extends Plugin {
                 routeTracker.update(request.start, request.boatPosition, request.held);
             }
             previousCourierPlan = plan;
+            previousPlanRequest = request;
         } else if (plan.available) {
             previousCourierPlan = plan;
         }
@@ -452,6 +493,7 @@ public class HarbourmasterPlugin extends Plugin {
         private final int freeSlots;
         private final int tasksUntilReset;
         private final CourierPlan routeToUpdate;
+        private final List<CourierTask> retainedOffers;
 
         private CourierPlanRequest(
                 Port start,
@@ -461,7 +503,8 @@ public class HarbourmasterPlugin extends Plugin {
                 int sailingLevel,
                 int freeSlots,
                 int tasksUntilReset,
-                CourierPlan routeToUpdate) {
+                CourierPlan routeToUpdate,
+                List<CourierTask> retainedOffers) {
             this.start = start;
             this.boatPosition = boatPosition;
             this.held = held;
@@ -470,6 +513,7 @@ public class HarbourmasterPlugin extends Plugin {
             this.freeSlots = freeSlots;
             this.tasksUntilReset = tasksUntilReset;
             this.routeToUpdate = routeToUpdate;
+            this.retainedOffers = retainedOffers;
         }
     }
 

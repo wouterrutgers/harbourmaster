@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.annotations.SerializedName;
 import com.harbourmaster.data.BoatSize;
+import com.harbourmaster.data.SailingObstacles;
 import com.harbourmaster.data.SailingPathfinder;
 import com.harbourmaster.model.Port;
 import com.harbourmaster.model.RouteLeg;
@@ -20,11 +21,16 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.Comparator;
 import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import net.runelite.api.IndexDataBase;
@@ -138,55 +144,83 @@ public final class RouteDataGenerator {
         }
     }
 
-    private static void generate(Path cacheDirectory, long cacheId, BoatSize selectedBoatSize) throws IOException {
+    private static void generate(Path cacheDirectory, long cacheId, BoatSize selectedBoatSize) throws Exception {
         long startedAt = System.nanoTime();
-        Map<BoatSize, List<RouteEntry>> generated = new EnumMap<>(BoatSize.class);
+        IndexDataBase terrain;
+        Map<Integer, BitSet> obstacleRegions;
         try (Store store = new Store(cacheDirectory.toFile())) {
             store.load();
-            IndexDataBase terrain = new CacheTerrainIndexDataBase(store, store.getIndex(IndexType.MAPS));
-            SailingPathfinder.prepareMasks();
-            SailingPathfinder pathfinder = new SailingPathfinder(terrain, 1);
+            obstacleRegions = SailingObstacleGenerator.generate(store);
+            terrain = new CacheTerrainIndexDataBase(store, store.getIndex(IndexType.MAPS));
+        }
+        SailingObstacles obstacles = new SailingObstacles(obstacleRegions);
+        SailingPathfinder.prepareMasks();
+        ExecutorService workers = Executors.newFixedThreadPool(selectedBoatSize == null ? BoatSize.values().length : 1);
+        Map<BoatSize, Future<List<RouteEntry>>> generated = new EnumMap<>(BoatSize.class);
+        try {
             for (BoatSize boatSize : BoatSize.values()) {
                 if (selectedBoatSize != null && selectedBoatSize != boatSize) {
                     continue;
                 }
-                List<RouteEntry> routes = new ArrayList<>();
-                for (int fromIndex = 0; fromIndex < Port.values().length; fromIndex++) {
-                    Port from = Port.values()[fromIndex];
-                    for (int toIndex = fromIndex + 1; toIndex < Port.values().length; toIndex++) {
-                        Port to = Port.values()[toIndex];
-                        RouteLeg route = pathfinder
-                                .route(from.navigationLocation, to.navigationLocation, boatSize)
-                                .map(result -> new RouteLeg(from, to, result.distance, result.points))
-                                .orElse(null);
-                        routes.add(new RouteEntry(from, to, route));
-                        System.out.printf(
-                                "%s: %s to %s, %s%n",
-                                boatSize,
-                                from.name,
-                                to.name,
-                                route == null ? "unreachable" : String.format("%.2f tiles", route.distance));
-                    }
-                }
-                generated.put(boatSize, routes);
+                generated.put(boatSize, workers.submit(() -> generate(terrain, obstacles, boatSize)));
             }
-        }
-        for (Map.Entry<BoatSize, List<RouteEntry>> entry : generated.entrySet()) {
-            write(entry.getKey(), cacheId, entry.getValue());
+            Map<BoatSize, List<RouteEntry>> completed = new EnumMap<>(BoatSize.class);
+            for (Map.Entry<BoatSize, Future<List<RouteEntry>>> entry : generated.entrySet()) {
+                completed.put(entry.getKey(), entry.getValue().get());
+            }
+            SailingObstacleGenerator.write(obstacleRegions);
+            for (Map.Entry<BoatSize, List<RouteEntry>> entry : completed.entrySet()) {
+                write(entry.getKey(), cacheId, entry.getValue());
+            }
+        } finally {
+            workers.shutdownNow();
         }
         System.out.printf(
-                "Generated %s in %.1f minutes%n",
-                selectedBoatSize == null ? "all sailing routes" : selectedBoatSize + " sailing routes",
-                (System.nanoTime() - startedAt) / 60_000_000_000.0);
+                "Generated sailing routes in %.1f minutes%n", (System.nanoTime() - startedAt) / 60_000_000_000.0);
+    }
+
+    private static List<RouteEntry> generate(IndexDataBase terrain, SailingObstacles obstacles, BoatSize boatSize) {
+        SailingPathfinder pathfinder = new SailingPathfinder(terrain, 1, obstacles);
+        List<RouteEntry> routes = new ArrayList<>();
+        for (int toIndex = 1; toIndex < Port.values().length; toIndex++) {
+            Port to = Port.values()[toIndex];
+            pathfinder.prepareDestination(to.navigationLocation, boatSize);
+            for (int fromIndex = 0; fromIndex < toIndex; fromIndex++) {
+                Port from = Port.values()[fromIndex];
+                if (Thread.currentThread().isInterrupted()) {
+                    throw new IllegalStateException("Sailing route generation interrupted");
+                }
+                RouteLeg route = pathfinder
+                        .route(from.navigationLocation, to.navigationLocation, boatSize)
+                        .map(result -> pathfinder.refineRoute(result, boatSize))
+                        .map(result -> new RouteLeg(from, to, result.distance, result.points))
+                        .orElse(null);
+                routes.add(new RouteEntry(from, to, route));
+                System.out.printf(
+                        "%s: %s to %s, %s%n",
+                        boatSize,
+                        from.name,
+                        to.name,
+                        route == null ? "unreachable" : String.format("%.2f tiles", route.distance));
+            }
+        }
+        routes.sort(Comparator.comparingInt(
+                        (RouteEntry route) -> Port.valueOf(route.from).ordinal())
+                .thenComparingInt(route -> Port.valueOf(route.to).ordinal()));
+        return routes;
     }
 
     private static final class CacheTerrainIndexDataBase implements IndexDataBase {
-        private final Store store;
-        private final Index index;
+        private final Map<Integer, byte[]> regions = new HashMap<>();
 
-        private CacheTerrainIndexDataBase(Store store, Index index) {
-            this.store = store;
-            this.index = index;
+        private CacheTerrainIndexDataBase(Store store, Index index) throws IOException {
+            for (Archive archive : index.getArchives()) {
+                if (!SailingPathfinder.includesRegion(archive.getArchiveId())) {
+                    continue;
+                }
+                ArchiveFiles files = archive.getFiles(store.getStorage().loadArchive(archive));
+                regions.put(archive.getArchiveId(), files.findFile(0).getContents());
+            }
         }
 
         @Override
@@ -196,28 +230,12 @@ public final class RouteDataGenerator {
 
         @Override
         public int[] getFileIds(int regionId) {
-            return archive(regionId) == null ? new int[0] : new int[] {0};
+            return regions.containsKey(regionId) ? new int[] {0} : new int[0];
         }
 
         @Override
         public byte[] loadData(int regionId, int fileId) {
-            Archive archive = archive(regionId);
-            if (archive == null || fileId != 0) {
-                return null;
-            }
-            try {
-                ArchiveFiles files = archive.getFiles(store.getStorage().loadArchive(archive));
-                return files.findFile(0).getContents();
-            } catch (IOException exception) {
-                throw new IllegalStateException("Unable to read terrain region " + regionId, exception);
-            }
-        }
-
-        private Archive archive(int regionId) {
-            if (!index.isNamed()) {
-                return index.getArchive(regionId);
-            }
-            return index.findArchiveByName("m" + (regionId >> 8) + "_" + (regionId & 255));
+            return fileId == 0 ? regions.get(regionId) : null;
         }
     }
 

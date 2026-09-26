@@ -53,7 +53,7 @@ public final class RouteStatusOverlay extends OverlayPanel {
                                     state.currentLeg.distance,
                                     state.nextPort().name),
                     config.activeRouteColor());
-            for (RouteEvent action : state.route.stops.get(0).events) {
+            for (RouteEvent action : state.route.nextActions()) {
                 line(action.description(), Color.WHITE);
             }
             if (state.currentLeg == null) {
@@ -62,6 +62,9 @@ public final class RouteStatusOverlay extends OverlayPanel {
         } else if (config.showRouteOverlay() && !state.route.available) {
             title("Route unavailable", config.activeRouteColor());
             line(state.route.reason, Color.LIGHT_GRAY);
+        } else if (config.showRouteOverlay() && state.freeSlots > 0) {
+            title("Check a noticeboard", config.activeRouteColor());
+            line("Open the board to choose courier tasks", Color.WHITE);
         } else {
             return null;
         }

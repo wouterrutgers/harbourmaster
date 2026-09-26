@@ -6,7 +6,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumMap;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -14,17 +13,16 @@ import java.util.stream.Stream;
 import net.runelite.api.coords.WorldPoint;
 
 public final class PortGraph {
-    private static final int SEARCH_STATES_PER_SLICE = 4;
     private final SailingRouter router;
     private final boolean background;
     private final Map<Integer, Optional<RouteLeg>> routes = new HashMap<>();
     private final Map<Port, Optional<RouteLeg>> boatRoutes = new EnumMap<>(Port.class);
     private final Map<PositionRouteKey, Optional<RouteLeg>> preparedBoatRoutes = new HashMap<>();
-    private final Map<RouteRequest, PendingRoute> pendingRoutes = new LinkedHashMap<>();
     private final Map<BoatSize, Map<Integer, Optional<RouteLeg>>> precomputedRoutes = new EnumMap<>(BoatSize.class);
 
     private BoatSize boatSize = BoatSize.SLOOP;
     private WorldPoint boatPosition;
+    private boolean missingRoutes;
 
     public PortGraph(SailingRouter router) {
         this(router, BoatSize.SLOOP, false);
@@ -45,27 +43,16 @@ public final class PortGraph {
         routes.putAll(precomputedRoutes.getOrDefault(boatSize, Map.of()));
         boatRoutes.clear();
         preparedBoatRoutes.clear();
-        pendingRoutes.clear();
+        missingRoutes = false;
         return true;
     }
 
-    public void advanceRouteSearches(long maximumNanos) {
-        long startedAt = System.nanoTime();
-        while (!pendingRoutes.isEmpty() && System.nanoTime() - startedAt < maximumNanos) {
-            PendingRoute pending = pendingRoutes.values().iterator().next();
-            if (!advance(pending, SEARCH_STATES_PER_SLICE)) {
-                continue;
-            }
-            complete(pending);
-        }
+    public boolean hasMissingRoutes() {
+        return missingRoutes;
     }
 
-    public boolean hasPendingRouteSearches() {
-        return !pendingRoutes.isEmpty();
-    }
-
-    public void clearPendingRouteSearches() {
-        pendingRoutes.clear();
+    public void clearMissingRoutes() {
+        missingRoutes = false;
     }
 
     public void loadPortRoutes(BoatSize boatSize, Map<Integer, Optional<RouteLeg>> routes) {
@@ -93,9 +80,6 @@ public final class PortGraph {
                 }
                 boatRoutes.remove(port);
             }
-            if (previousPosition == null) {
-                boatRoutes.clear();
-            }
             preparedBoatRoutes
                     .keySet()
                     .removeIf(key -> !key.position.equals(position)
@@ -119,18 +103,7 @@ public final class PortGraph {
         if (background) {
             return boatRoutes.computeIfAbsent(destination, port -> searchRoute(null, position, port));
         }
-        if (pendingRoutes.values().stream().anyMatch(pending -> pending.from == null && pending.to == destination)) {
-            return Optional.empty();
-        }
-        RouteRequest request = RouteRequest.forPosition(key);
-        PendingRoute pending = pendingRoutes.get(request);
-        if (pending == null) {
-            pending = beginBoatRoute(key);
-        }
-        if (isFirstPending(pending) && advance(pending, SEARCH_STATES_PER_SLICE)) {
-            complete(pending);
-            return boatRoutes.computeIfAbsent(destination, ignored -> preparedBoatRoutes.get(key));
-        }
+        missingRoutes = true;
         return Optional.empty();
     }
 
@@ -150,15 +123,7 @@ public final class PortGraph {
             cacheRoute(from, to, route);
             return route;
         }
-        RouteRequest request = RouteRequest.forPorts(from, to);
-        PendingRoute pending = pendingRoutes.get(request);
-        if (pending == null) {
-            pending = beginPortRoute(from, to);
-        }
-        if (isFirstPending(pending) && advance(pending, SEARCH_STATES_PER_SLICE)) {
-            complete(pending);
-            return routes.get(key);
-        }
+        missingRoutes = true;
         return Optional.empty();
     }
 
@@ -188,11 +153,7 @@ public final class PortGraph {
                 preparedBoatRoutes.put(new PositionRouteKey(computed.boatPosition, entry.getKey()), entry.getValue());
             }
         }
-        pendingRoutes
-                .entrySet()
-                .removeIf(entry -> entry.getKey().positionKey == null
-                        ? routes.containsKey(routeKey(entry.getKey().from, entry.getKey().to))
-                        : preparedBoatRoutes.containsKey(entry.getKey().positionKey));
+        missingRoutes = false;
     }
 
     private Optional<RouteLeg> reusableBoatRoute(WorldPoint position, Port destination) {
@@ -206,45 +167,6 @@ public final class PortGraph {
                 .findFirst();
     }
 
-    private PendingRoute beginPortRoute(Port from, Port to) {
-        RouteRequest request = RouteRequest.forPorts(from, to);
-        PendingRoute pending = new PendingRoute(request, from, to, null);
-        pendingRoutes.put(request, pending);
-        return pending;
-    }
-
-    private PendingRoute beginBoatRoute(PositionRouteKey key) {
-        RouteRequest request = RouteRequest.forPosition(key);
-        PendingRoute pending = new PendingRoute(request, null, key.port, key);
-        pendingRoutes.put(request, pending);
-        return pending;
-    }
-
-    private boolean isFirstPending(PendingRoute pending) {
-        return pendingRoutes.values().iterator().next() == pending;
-    }
-
-    private boolean advance(PendingRoute pending, int maximumExpandedStates) {
-        if (pending.search == null) {
-            WorldPoint from =
-                    pending.positionKey == null ? pending.from.navigationLocation : pending.positionKey.position;
-            pending.search = router.search(from, pending.to.navigationLocation, boatSize);
-        }
-        return pending.search.advance(maximumExpandedStates);
-    }
-
-    private void complete(PendingRoute pending) {
-        Optional<RouteLeg> result = pending.search
-                .result()
-                .map(route -> new RouteLeg(pending.from, pending.to, route.distance, route.points));
-        if (pending.positionKey == null) {
-            cacheRoute(pending.from, pending.to, result);
-        } else {
-            preparedBoatRoutes.put(pending.positionKey, result);
-        }
-        pendingRoutes.remove(pending.request);
-    }
-
     private void cacheRoute(Port from, Port to, Optional<RouteLeg> route) {
         routes.put(routeKey(from, to), route);
         routes.put(routeKey(to, from), route.map(forward -> {
@@ -252,13 +174,11 @@ public final class PortGraph {
             Collections.reverse(points);
             return new RouteLeg(to, from, forward.distance, points);
         }));
-        pendingRoutes.remove(RouteRequest.forPorts(to, from));
     }
 
     private Optional<RouteLeg> searchRoute(Port from, WorldPoint position, Port to) {
-        SailingSearch search = router.search(position, to.navigationLocation, boatSize);
-        while (!search.advance(Integer.MAX_VALUE)) {}
-        return search.result().map(route -> new RouteLeg(from, to, route.distance, route.points));
+        return router.route(position, to.navigationLocation, boatSize)
+                .map(route -> new RouteLeg(from, to, route.distance, route.points));
     }
 
     private static Optional<RouteLeg> remainingRoute(RouteLeg route, WorldPoint position) {
@@ -307,60 +227,6 @@ public final class PortGraph {
 
     static int routeKey(Port from, Port to) {
         return from.ordinal() * Port.values().length + to.ordinal();
-    }
-
-    private static final class PendingRoute {
-        private final RouteRequest request;
-        private final Port from;
-        private final Port to;
-        private final PositionRouteKey positionKey;
-        private SailingSearch search;
-
-        private PendingRoute(RouteRequest request, Port from, Port to, PositionRouteKey positionKey) {
-            this.request = request;
-            this.from = from;
-            this.to = to;
-            this.positionKey = positionKey;
-        }
-    }
-
-    private static final class RouteRequest {
-        private final Port from;
-        private final PositionRouteKey positionKey;
-        private final Port to;
-
-        private RouteRequest(Port from, PositionRouteKey positionKey, Port to) {
-            this.from = from;
-            this.positionKey = positionKey;
-            this.to = to;
-        }
-
-        private static RouteRequest forPorts(Port from, Port to) {
-            return new RouteRequest(from, null, to);
-        }
-
-        private static RouteRequest forPosition(PositionRouteKey key) {
-            return new RouteRequest(null, key, key.port);
-        }
-
-        @Override
-        public boolean equals(Object other) {
-            if (this == other) {
-                return true;
-            }
-            if (!(other instanceof RouteRequest)) {
-                return false;
-            }
-            RouteRequest request = (RouteRequest) other;
-            return from == request.from
-                    && java.util.Objects.equals(positionKey, request.positionKey)
-                    && to == request.to;
-        }
-
-        @Override
-        public int hashCode() {
-            return java.util.Objects.hash(from, positionKey, to);
-        }
     }
 
     private static final class PositionRouteKey {

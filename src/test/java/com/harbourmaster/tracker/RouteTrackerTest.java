@@ -108,14 +108,16 @@ public class RouteTrackerTest {
         WorldPoint firstBoatPosition = new WorldPoint(150, 100, 0);
         WorldPoint secondBoatPosition = new WorldPoint(200, 220, 0);
         RouteTracker moving = new RouteTracker(new RouteOptimizer(new PortGraph((from, to, boatSize) -> {
-            if (from.equals(firstBoatPosition)) {
-                return Optional.of(new RouteLeg(null, null, 150, List.of(firstBoatPosition, bend, destination)));
-            }
-            if (from.equals(secondBoatPosition)) {
-                return Optional.of(new RouteLeg(null, null, 20, List.of(secondBoatPosition, destination)));
-            }
-            return Optional.of(new RouteLeg(null, null, 200, List.of(origin, bend, destination)));
-        })));
+                    if (from.equals(firstBoatPosition)) {
+                        return Optional.of(
+                                new RouteLeg(null, null, 150, List.of(firstBoatPosition, bend, destination)));
+                    }
+                    if (from.equals(secondBoatPosition)) {
+                        return Optional.of(new RouteLeg(null, null, 20, List.of(secondBoatPosition, destination)));
+                    }
+                    return Optional.of(new RouteLeg(null, null, 200, List.of(origin, bend, destination)));
+                })
+                .detachedSnapshot(null)));
         List<ActiveTask> tasks = List.of(loaded(courier(1, A, B, 100)));
         RoutePlan route = moving.update(A, firstBoatPosition, tasks);
         assertEquals(150, route.distance, 0.00001);
@@ -142,7 +144,6 @@ public class RouteTrackerTest {
         return new HarbourmasterSnapshot(
                 true,
                 tracker.update(start, tasks),
-                List.of(),
                 false,
                 5 - tasks.size(),
                 DockChecklist.at(dock, tasks),

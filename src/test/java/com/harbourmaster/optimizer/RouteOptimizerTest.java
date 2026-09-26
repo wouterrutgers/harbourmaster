@@ -8,13 +8,17 @@ import com.harbourmaster.model.ActiveTask;
 import com.harbourmaster.model.CourierTask;
 import com.harbourmaster.model.Port;
 import com.harbourmaster.model.RouteEvent;
+import com.harbourmaster.model.RouteLeg;
 import com.harbourmaster.model.RoutePlan;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
 import java.util.stream.Collectors;
+import net.runelite.api.coords.WorldPoint;
 import org.junit.Test;
 
 public class RouteOptimizerTest {
@@ -71,6 +75,34 @@ public class RouteOptimizerTest {
     }
 
     @Test
+    public void boardingTimeCanMakeASlightlyLongerSailingRouteFaster() {
+        Map<WorldPoint, WorldPoint> positions = Map.of(
+                A.navigationLocation, new WorldPoint(7, 14, 0),
+                B.navigationLocation, new WorldPoint(17, 14, 0),
+                C.navigationLocation, new WorldPoint(20, 5, 0),
+                D.navigationLocation, new WorldPoint(17, 1, 0));
+        PortGraph graph = new PortGraph((from, to, size) -> Optional.of(new RouteLeg(
+                        null,
+                        null,
+                        Math.hypot(
+                                positions.get(to).getX() - positions.get(from).getX(),
+                                positions.get(to).getY() - positions.get(from).getY()),
+                        List.of(from, to))))
+                .detachedSnapshot(null);
+
+        RoutePlan plan = new RouteOptimizer(graph)
+                .optimize(
+                        A,
+                        List.of(
+                                accepted(courier(1, B, D, 100)),
+                                accepted(courier(2, B, D, 100)),
+                                accepted(courier(3, C, B, 100))));
+
+        assertEquals(
+                List.of(C, B, D), plan.stops.stream().map(stop -> stop.port).collect(Collectors.toList()));
+    }
+
+    @Test
     public void optimumAgreesWithIndependentExhaustiveSearch() {
         Random random = new Random(20260921);
         Port[] ports = {A, B, C, D, E};
@@ -84,7 +116,9 @@ public class RouteOptimizerTest {
             Port start = ports[random.nextInt(ports.length)];
             assertEquals(
                     brute(line(), start, tasks, new HashSet<>(), new HashSet<>()),
-                    optimizer.optimize(start, tasks).distance,
+                    optimizer.optimize(start, tasks).legs.stream()
+                            .mapToDouble(leg -> leg.distance / 4 + 2)
+                            .sum(),
                     0.00001);
         }
     }
@@ -106,7 +140,8 @@ public class RouteOptimizerTest {
             changed.add(task.id);
             best = Math.min(
                     best,
-                    graph.route(from, destination).get().distance
+                    graph.route(from, destination).get().distance / 4
+                            + (from == destination ? 0 : 2)
                             + brute(graph, destination, tasks, picked, delivered));
             changed.remove(task.id);
         }

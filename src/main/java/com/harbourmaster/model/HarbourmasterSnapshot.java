@@ -8,7 +8,6 @@ import java.util.stream.Collectors;
 public final class HarbourmasterSnapshot {
     public final boolean loggedIn;
     public final RoutePlan route;
-    public final List<CourierTask> offers;
     public final boolean boardOpen;
     public final int freeSlots;
     public final DockChecklist dock;
@@ -21,19 +20,17 @@ public final class HarbourmasterSnapshot {
     public HarbourmasterSnapshot(
             boolean loggedIn,
             RoutePlan route,
-            List<CourierTask> offers,
             boolean boardOpen,
             int freeSlots,
             DockChecklist dock,
             Map<Integer, CargoTracker.Destination> cargo,
             boolean depositCargo) {
-        this(loggedIn, route, offers, boardOpen, freeSlots, dock, cargo, depositCargo, null);
+        this(loggedIn, route, boardOpen, freeSlots, dock, cargo, depositCargo, null);
     }
 
     public HarbourmasterSnapshot(
             boolean loggedIn,
             RoutePlan route,
-            List<CourierTask> offers,
             boolean boardOpen,
             int freeSlots,
             DockChecklist dock,
@@ -42,10 +39,9 @@ public final class HarbourmasterSnapshot {
             CourierPlan courierPlan) {
         this.loggedIn = loggedIn;
         this.route = route;
-        this.offers = List.copyOf(offers);
         this.boardOpen = boardOpen;
         this.freeSlots = freeSlots;
-        this.dock = dock;
+        this.dock = dock.follow(route);
         this.cargo = Map.copyOf(cargo);
         this.depositCargo = depositCargo;
         this.courierPlan = courierPlan;
@@ -57,10 +53,16 @@ public final class HarbourmasterSnapshot {
 
     public static HarbourmasterSnapshot empty() {
         return new HarbourmasterSnapshot(
-                false, RoutePlan.empty(), List.of(), false, 0, DockChecklist.at(null, List.of()), Map.of(), false);
+                false, RoutePlan.empty(), false, 0, DockChecklist.at(null, List.of()), Map.of(), false);
     }
 
     public Port nextPort() {
         return route.stops.isEmpty() ? null : route.stops.get(0).port;
+    }
+
+    public boolean recommends(CourierTask task) {
+        return freeSlots > 0
+                && route.nextActions().stream()
+                        .anyMatch(event -> event.action == RouteEvent.Action.ACCEPT && event.task.id == task.id);
     }
 }

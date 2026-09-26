@@ -39,8 +39,9 @@ public final class Fixtures {
     }
 
     public static PortGraph line() {
-        return new PortGraph(
-                (from, to, boatSize) -> Optional.of(new RouteLeg(null, null, distance(from, to), List.of(from, to))));
+        return new PortGraph((from, to, boatSize) ->
+                        Optional.of(new RouteLeg(null, null, distance(from, to), List.of(from, to))))
+                .detachedSnapshot(null);
     }
 
     private static double distance(WorldPoint from, WorldPoint to) {
