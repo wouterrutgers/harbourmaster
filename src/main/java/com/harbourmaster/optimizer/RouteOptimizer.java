@@ -27,23 +27,30 @@ public final class RouteOptimizer {
     }
 
     public RoutePlan optimize(Port start, WorldPoint boatPosition, List<ActiveTask> tasks, Port firstStop) {
-        return plan(start, boatPosition, tasks, firstStop, false);
+        return plan(start, boatPosition, tasks, List.of(), 0, 0, firstStop);
     }
 
-    public RoutePlan optimizeForExperience(
-            Port start, WorldPoint boatPosition, List<ActiveTask> tasks, Port firstStop) {
-        return plan(start, boatPosition, tasks, firstStop, true);
-    }
-
-    public RoutePlan optimizeForExperience(Port start, List<ActiveTask> tasks) {
-        return optimizeForExperience(start, null, tasks, null);
+    public RoutePlan optimizeWithOffers(
+            Port start,
+            WorldPoint boatPosition,
+            List<ActiveTask> held,
+            List<CourierTask> offers,
+            int freeSlots,
+            int tasksUntilReset) {
+        return plan(start, boatPosition, held, offers, freeSlots, tasksUntilReset, null);
     }
 
     private RoutePlan plan(
-            Port start, WorldPoint boatPosition, List<ActiveTask> tasks, Port firstStop, boolean prioritizeExperience) {
+            Port start,
+            WorldPoint boatPosition,
+            List<ActiveTask> held,
+            List<CourierTask> offers,
+            int freeSlots,
+            int tasksUntilReset,
+            Port firstStop) {
         List<RouteEvent> events = new ArrayList<>();
         List<Integer> prerequisites = new ArrayList<>();
-        for (ActiveTask active : tasks) {
+        for (ActiveTask active : held) {
             if (active.definition == null) {
                 return RoutePlan.unavailable("Unrecognized active task " + active.taskId);
             }
@@ -62,6 +69,27 @@ public final class RouteOptimizer {
                     active.slot, task, RouteEvent.Action.DELIVER, task.delivery, active.deliveryRemaining()));
             prerequisites.add(pickupMask);
         }
+        for (CourierTask task : offers) {
+            int acceptance = 1 << events.size();
+            events.add(new RouteEvent(-1, task, RouteEvent.Action.ACCEPT, task.board, 0));
+            prerequisites.add(0);
+            int pickup = 1 << events.size();
+            events.add(new RouteEvent(-1, task, RouteEvent.Action.PICKUP, task.pickup, task.quantity));
+            prerequisites.add(acceptance);
+            events.add(new RouteEvent(-1, task, RouteEvent.Action.DELIVER, task.delivery, task.quantity));
+            prerequisites.add(pickup);
+        }
+        return optimize(start, boatPosition, events, prerequisites, firstStop, freeSlots, tasksUntilReset);
+    }
+
+    private RoutePlan optimize(
+            Port start,
+            WorldPoint boatPosition,
+            List<RouteEvent> events,
+            List<Integer> prerequisites,
+            Port firstStop,
+            int freeSlots,
+            int tasksUntilReset) {
         if (events.isEmpty()) {
             return RoutePlan.empty();
         }
@@ -70,28 +98,6 @@ public final class RouteOptimizer {
         }
         int count = events.size();
         int complete = (1 << count) - 1;
-        double[] outstanding = new double[complete + 1];
-        if (prioritizeExperience) {
-            double slotValue = Math.max(
-                    1,
-                    events.stream()
-                            .filter(event -> event.action == RouteEvent.Action.DELIVER && event.task.experience >= 0)
-                            .mapToInt(event -> event.task.experience)
-                            .average()
-                            .orElse(1));
-            double[] weights = new double[count];
-            for (int event = 0; event < count; event++) {
-                if (events.get(event).action == RouteEvent.Action.DELIVER) {
-                    weights[event] = Math.max(0, events.get(event).task.experience) + slotValue;
-                    outstanding[0] += weights[event];
-                }
-            }
-            for (int mask = 1; mask <= complete; mask++) {
-                outstanding[mask] = outstanding[mask & (mask - 1)] - weights[Integer.numberOfTrailingZeros(mask)];
-            }
-        } else {
-            Arrays.fill(outstanding, 1);
-        }
         RouteLeg[][] journeys = new RouteLeg[count + 1][count];
         for (int destination = 0; destination < count; destination++) {
             journeys[count][destination] = journey(start, boatPosition, events.get(destination).port);
@@ -100,27 +106,38 @@ public final class RouteOptimizer {
                         .orElse(null);
             }
         }
-        double[][] costs = new double[complete + 1][count];
         double[][] distances = new double[complete + 1][count];
         int[][] parents = new int[complete + 1][count];
         int[][] sailings = new int[complete + 1][count];
         for (int mask = 0; mask <= complete; mask++) {
-            Arrays.fill(costs[mask], Double.POSITIVE_INFINITY);
+            Arrays.fill(distances[mask], Double.POSITIVE_INFINITY);
             Arrays.fill(parents[mask], -1);
+        }
+        int acceptances = 0;
+        int deliveries = 0;
+        for (int event = 0; event < count; event++) {
+            if (events.get(event).action == RouteEvent.Action.ACCEPT) {
+                acceptances |= 1 << event;
+            }
+            if (events.get(event).action == RouteEvent.Action.DELIVER) {
+                deliveries |= 1 << event;
+            }
         }
         for (int event = 0; event < count; event++) {
             RouteLeg journey = journeys[count][event];
             if (prerequisites.get(event) == 0
                     && journey != null
+                    && (events.get(event).action != RouteEvent.Action.ACCEPT || freeSlots > 0 && tasksUntilReset > 0)
                     && (firstStop == null || events.get(event).port == firstStop)) {
-                costs[1 << event][event] = journey.distance * outstanding[0];
                 distances[1 << event][event] = journey.distance;
                 sailings[1 << event][event] = journey.from == journey.to ? 0 : 1;
             }
         }
         for (int visited = 1; visited <= complete; visited++) {
+            int completedTasks = Integer.bitCount(visited & deliveries);
+            int availableSlots = freeSlots + completedTasks - Integer.bitCount(visited & acceptances);
             for (int previous = 0; previous < count; previous++) {
-                if (!Double.isFinite(costs[visited][previous])) {
+                if (!Double.isFinite(distances[visited][previous])) {
                     continue;
                 }
                 for (int next = 0; next < count; next++) {
@@ -128,21 +145,15 @@ public final class RouteOptimizer {
                     RouteLeg journey = journeys[previous][next];
                     if ((visited & bit) != 0
                             || (visited & prerequisites.get(next)) != prerequisites.get(next)
+                            || (events.get(next).action == RouteEvent.Action.ACCEPT
+                                    && (availableSlots == 0 || completedTasks >= tasksUntilReset))
                             || journey == null) {
                         continue;
                     }
                     int combined = visited | bit;
-                    double cost = costs[visited][previous] + journey.distance * outstanding[visited];
                     double distance = distances[visited][previous] + journey.distance;
                     int sailCount = sailings[visited][previous] + (journey.from == journey.to ? 0 : 1);
-                    if (better(
-                            cost,
-                            distance,
-                            sailCount,
-                            costs[combined][next],
-                            distances[combined][next],
-                            sailings[combined][next])) {
-                        costs[combined][next] = cost;
+                    if (better(distance, sailCount, distances[combined][next], sailings[combined][next])) {
                         distances[combined][next] = distance;
                         sailings[combined][next] = sailCount;
                         parents[combined][next] = previous;
@@ -152,13 +163,11 @@ public final class RouteOptimizer {
         }
         int last = -1;
         for (int event = 0; event < count; event++) {
-            if (Double.isFinite(costs[complete][event])
+            if (Double.isFinite(distances[complete][event])
                     && (last < 0
                             || better(
-                                    costs[complete][event],
                                     distances[complete][event],
                                     sailings[complete][event],
-                                    costs[complete][last],
                                     distances[complete][last],
                                     sailings[complete][last]))) {
                 last = event;
@@ -228,16 +237,8 @@ public final class RouteOptimizer {
                 .orElse(null);
     }
 
-    private static boolean better(
-            double cost,
-            double distance,
-            int sailings,
-            double existing,
-            double existingDistance,
-            int existingSailings) {
-        return cost < existing - EPSILON
-                || (Math.abs(cost - existing) < EPSILON
-                        && (distance < existingDistance - EPSILON
-                                || (Math.abs(distance - existingDistance) < EPSILON && sailings < existingSailings)));
+    private static boolean better(double distance, int sailings, double existingDistance, int existingSailings) {
+        return distance < existingDistance - EPSILON
+                || (Math.abs(distance - existingDistance) < EPSILON && sailings < existingSailings);
     }
 }

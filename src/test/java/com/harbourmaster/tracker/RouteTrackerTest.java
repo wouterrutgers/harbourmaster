@@ -4,7 +4,6 @@ import static com.harbourmaster.Fixtures.*;
 import static org.junit.Assert.*;
 
 import com.harbourmaster.data.PortGraph;
-import com.harbourmaster.data.PortPathData;
 import com.harbourmaster.model.ActiveTask;
 import com.harbourmaster.model.CourierTask;
 import com.harbourmaster.model.DockChecklist;
@@ -16,6 +15,8 @@ import com.harbourmaster.optimizer.RouteOptimizer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.stream.Collectors;
 import net.runelite.api.coords.WorldPoint;
 import org.junit.Test;
 
@@ -74,8 +75,8 @@ public class RouteTrackerTest {
     }
 
     @Test
-    public void remotePickupDoesNotInterruptFourPendingDeliveries() {
-        RouteTracker sailing = new RouteTracker(new RouteOptimizer(new PortGraph(PortPathData.load())));
+    public void acceptingARemotePickupReordersTheRouteToReduceTotalDistance() {
+        RouteTracker sailing = new RouteTracker(new RouteOptimizer(line()));
         List<ActiveTask> deliveries = List.of(
                 loaded(courier(1, Port.PORT_ROBERTS, Port.DEEPFIN_POINT, 100)),
                 loaded(courier(2, Port.PORT_ROBERTS, Port.DEEPFIN_POINT, 100)),
@@ -88,12 +89,15 @@ public class RouteTrackerTest {
 
         List<ActiveTask> held = new ArrayList<>(deliveries);
         held.add(newTask);
-        assertSame(
-                Port.DEEPFIN_POINT,
-                sailing.update(Port.PORT_ROBERTS, held).stops.get(0).port);
-        assertSame(
-                Port.PORT_PISCARILIUS,
-                sailing.update(Port.DEEPFIN_POINT, List.of(newTask)).stops.get(0).port);
+        RoutePlan route = sailing.update(Port.PORT_ROBERTS, held);
+        assertSame(Port.PORT_PISCARILIUS, route.stops.get(0).port);
+
+        List<ActiveTask> carrying = new ArrayList<>(deliveries);
+        carrying.add(loaded(newTask.definition));
+        route = sailing.update(Port.PORT_PISCARILIUS, carrying);
+        assertEquals(
+                List.of(Port.PORT_ROBERTS, Port.DEEPFIN_POINT),
+                route.stops.stream().map(stop -> stop.port).collect(Collectors.toList()));
     }
 
     @Test
@@ -101,13 +105,22 @@ public class RouteTrackerTest {
         WorldPoint origin = new WorldPoint(100, 100, 0);
         WorldPoint bend = new WorldPoint(200, 100, 0);
         WorldPoint destination = new WorldPoint(200, 200, 0);
-        RouteTracker moving = new RouteTracker(new RouteOptimizer(
-                new PortGraph(List.of(new RouteLeg(A, B, 200, List.of(origin, bend, destination))))));
+        WorldPoint firstBoatPosition = new WorldPoint(150, 100, 0);
+        WorldPoint secondBoatPosition = new WorldPoint(200, 220, 0);
+        RouteTracker moving = new RouteTracker(new RouteOptimizer(new PortGraph((from, to, boatSize) -> {
+            if (from.equals(firstBoatPosition)) {
+                return Optional.of(new RouteLeg(null, null, 150, List.of(firstBoatPosition, bend, destination)));
+            }
+            if (from.equals(secondBoatPosition)) {
+                return Optional.of(new RouteLeg(null, null, 20, List.of(secondBoatPosition, destination)));
+            }
+            return Optional.of(new RouteLeg(null, null, 200, List.of(origin, bend, destination)));
+        })));
         List<ActiveTask> tasks = List.of(loaded(courier(1, A, B, 100)));
-        RoutePlan route = moving.update(A, new WorldPoint(150, 100, 0), tasks);
+        RoutePlan route = moving.update(A, firstBoatPosition, tasks);
         assertEquals(150, route.distance, 0.00001);
         assertEquals(List.of(new WorldPoint(150, 100, 0), bend, destination), route.legs.get(0).points);
-        route = moving.update(A, new WorldPoint(200, 220, 0), tasks);
+        route = moving.update(A, secondBoatPosition, tasks);
         assertEquals(20, route.distance, 0.00001);
         assertEquals(new WorldPoint(200, 220, 0), route.legs.get(0).points.get(0));
         assertSame(B, route.stops.get(0).port);
@@ -118,14 +131,11 @@ public class RouteTrackerTest {
 
     @Test
     public void initialOrderingUsesBoatPositionRatherThanLastPort() {
-        WorldPoint origin = new WorldPoint(100, 100, 0);
-        WorldPoint destination = new WorldPoint(300, 100, 0);
-        RouteTracker moving = new RouteTracker(
-                new RouteOptimizer(new PortGraph(List.of(new RouteLeg(A, B, 200, List.of(origin, destination))))));
+        RouteTracker moving = new RouteTracker(new RouteOptimizer(line()));
         RoutePlan route = moving.update(
-                A, new WorldPoint(280, 100, 0), List.of(loaded(courier(1, B, A, 100)), loaded(courier(2, A, B, 100))));
+                A, B.navigationLocation, List.of(loaded(courier(1, B, A, 100)), loaded(courier(2, A, B, 100))));
         assertSame(B, route.stops.get(0).port);
-        assertEquals(220, route.distance, 0.00001);
+        assertEquals(10, route.distance, 0.00001);
     }
 
     private HarbourmasterSnapshot update(Port start, Port dock, List<ActiveTask> tasks) {

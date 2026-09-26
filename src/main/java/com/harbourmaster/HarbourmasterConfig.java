@@ -35,7 +35,7 @@ public interface HarbourmasterConfig extends Config {
     @ConfigItem(
             keyName = "rankOffers",
             name = "Highlight recommended offers",
-            description = "Highlight courier jobs based on XP, added sailing distance and held tasks.",
+            description = "Highlight courier offers selected for the best courier XP per hour.",
             section = noticeboard,
             position = 2)
     default boolean rankOffers() {
@@ -59,7 +59,7 @@ public interface HarbourmasterConfig extends Config {
     @ConfigItem(
             keyName = "enableOptimizer",
             name = "Enable route optimiser",
-            description = "Find an optimized route that considers distance, task XP and free slots.",
+            description = "Find an efficient sailing route through your courier plan.",
             section = route,
             position = 0)
     default boolean enableOptimizer() {

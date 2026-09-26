@@ -3,6 +3,7 @@ package com.harbourmaster.tracker;
 import static org.junit.Assert.*;
 
 import com.harbourmaster.ApiStub;
+import com.harbourmaster.data.BoatSize;
 import com.harbourmaster.model.Port;
 import java.util.List;
 import net.runelite.api.Client;
@@ -15,6 +16,7 @@ import net.runelite.api.WorldEntity;
 import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
+import net.runelite.api.gameval.ObjectID;
 import net.runelite.api.gameval.VarbitID;
 import org.junit.Test;
 
@@ -143,6 +145,57 @@ public class PortTrackerTest {
     }
 
     @Test
+    public void detectsTheVesselSizeFromItsCargoHold() {
+        tracker.add(ApiStub.of(GameObject.class, (method, arguments) -> {
+            switch (method) {
+                case "getId":
+                    return ObjectID.SAILING_BOAT_CARGO_HOLD_REGULAR_2X5;
+                case "getWorldView":
+                    return boat;
+                default:
+                    throw new AssertionError(method);
+            }
+        }));
+
+        tracker.update(client, null);
+
+        assertSame(BoatSize.SKIFF, tracker.getBoatSize());
+    }
+
+    @Test
+    public void usesTheNearestVisibleVesselWhenNotAboard() {
+        aboard = false;
+        tracker.add(ApiStub.of(GameObject.class, (method, arguments) -> {
+            switch (method) {
+                case "getId":
+                    return ObjectID.SAILING_BOAT_CARGO_HOLD_REGULAR_LARGE;
+                case "getWorldView":
+                    return world;
+                case "getLocalLocation":
+                    return new LocalPoint(64 + 10 * 128, 64, WorldView.TOPLEVEL);
+                default:
+                    throw new AssertionError(method);
+            }
+        }));
+        tracker.add(ApiStub.of(GameObject.class, (method, arguments) -> {
+            switch (method) {
+                case "getId":
+                    return ObjectID.SAILING_BOAT_CARGO_HOLD_REGULAR_2X5;
+                case "getWorldView":
+                    return world;
+                case "getLocalLocation":
+                    return new LocalPoint(64 + 2 * 128, 64, WorldView.TOPLEVEL);
+                default:
+                    throw new AssertionError(method);
+            }
+        }));
+
+        tracker.update(client, null);
+
+        assertSame(BoatSize.SKIFF, tracker.getBoatSize());
+    }
+
+    @Test
     public void sceneScanToleratesAnEntityWhoseWorldViewIsNotLoadedYet() {
         tracker.scanScene(client);
     }
@@ -170,5 +223,32 @@ public class PortTrackerTest {
         atSea = false;
         tracker.update(client, null);
         assertSame(Port.PORT_ROBERTS, tracker.getDock());
+    }
+
+    @Test
+    public void disembarkingAtDestinationUpdatesDockBeforeAtSeaFlagClears() {
+        location = Port.PORT_ROBERTS.navigationLocation;
+        tracker.update(client, Port.PORT_ROBERTS);
+
+        location = Port.LANDS_END.navigationLocation;
+        aboard = false;
+        atSea = true;
+        tracker.add(ApiStub.of(GameObject.class, (method, arguments) -> {
+            switch (method) {
+                case "getId":
+                    return Port.LANDS_END.gangplankObject;
+                case "getWorldView":
+                    return world;
+                case "getLocalLocation":
+                    return new LocalPoint(64, 64, WorldView.TOPLEVEL);
+                default:
+                    throw new AssertionError(method);
+            }
+        }));
+
+        tracker.update(client, null);
+
+        assertSame(Port.LANDS_END, tracker.getDock());
+        assertSame(Port.LANDS_END, tracker.getStart());
     }
 }

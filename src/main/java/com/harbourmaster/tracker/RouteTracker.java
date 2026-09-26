@@ -25,8 +25,11 @@ public final class RouteTracker {
 
     public RoutePlan update(Port start, WorldPoint boatPosition, List<ActiveTask> tasks) {
         if (previousPlan != null && previousPlan.available && tasks.equals(previousTasks)) {
-            previousPlan = optimizer.relocate(previousPlan, start, boatPosition);
-            return previousPlan;
+            RoutePlan relocated = optimizer.relocate(previousPlan, start, boatPosition);
+            if (relocated.available) {
+                previousPlan = relocated;
+            }
+            return relocated;
         }
         if (tasks.stream().anyMatch(task -> previousTasks.stream()
                 .noneMatch(previous -> previous.slot == task.slot && previous.taskId == task.taskId))) {
@@ -35,7 +38,7 @@ public final class RouteTracker {
         Port firstStop = pendingStop != null && pendingStop.events.stream().anyMatch(event -> pending(event, tasks))
                 ? pendingStop.port
                 : null;
-        RoutePlan route = optimizer.optimizeForExperience(start, boatPosition, tasks, firstStop);
+        RoutePlan route = optimizer.optimize(start, boatPosition, tasks, firstStop);
         previousTasks = List.copyOf(tasks);
         if (route.available) {
             pendingStop = route.stops.isEmpty() ? null : route.stops.get(0);

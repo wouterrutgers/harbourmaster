@@ -16,11 +16,15 @@ public final class RouteEvent {
     }
 
     public enum Action {
+        ACCEPT,
         PICKUP,
         DELIVER
     }
 
     public String description() {
+        if (action == Action.ACCEPT) {
+            return "Accept " + task.name;
+        }
         return (action == Action.PICKUP ? "Pick up " : "Deliver ") + quantity + " × " + task.itemName;
     }
 }

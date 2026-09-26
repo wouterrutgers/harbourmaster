@@ -18,10 +18,24 @@ def pluginMainClass = 'com.harbourmaster.HarbourmasterLauncher'
 
 dependencies {
     compileOnly group: 'net.runelite', name:'client', version: runeLiteVersion
+    compileOnly 'com.google.code.gson:gson:2.8.5'
 
     testImplementation 'junit:junit:4.13.2'
     testImplementation group: 'net.runelite', name:'client', version: runeLiteVersion
     testImplementation group: 'net.runelite', name:'jshell', version: runeLiteVersion
+}
+
+def generatorSourceSet = sourceSets.create('generator')
+generatorSourceSet.compileClasspath += sourceSets.main.output + configurations.compileClasspath
+generatorSourceSet.runtimeClasspath += sourceSets.main.output + configurations.compileClasspath
+
+dependencies {
+    generatorImplementation 'net.runelite:cache:latest.integration'
+}
+
+configurations.matching { it.name.startsWith('generator') }.configureEach {
+    resolutionStrategy.cacheDynamicVersionsFor 0, 'seconds'
+    resolutionStrategy.cacheChangingModulesFor 0, 'seconds'
 }
 
 def pluginProperties = new Properties()
@@ -88,4 +102,22 @@ java {
 
 tasks.named('test') {
     systemProperty 'java.awt.headless', 'true'
+}
+
+tasks.register('generateRoutes', JavaExec) {
+    dependsOn tasks.named('generatorClasses')
+    classpath = generatorSourceSet.runtimeClasspath
+    mainClass = 'com.harbourmaster.tools.RouteDataGenerator'
+    maxHeapSize = '8g'
+    args project.findProperty('cacheId')?.toString() ?: ''
+    args project.findProperty('boatSize')?.toString() ?: ''
+    workingDir projectDir
+}
+
+tasks.register('latestRouteCacheId', JavaExec) {
+    dependsOn tasks.named('generatorClasses')
+    classpath = generatorSourceSet.runtimeClasspath
+    mainClass = 'com.harbourmaster.tools.RouteDataGenerator'
+    args '--latest-cache-id'
+    workingDir projectDir
 }

@@ -1,5 +1,6 @@
 package com.harbourmaster.tracker;
 
+import com.harbourmaster.data.BoatSize;
 import com.harbourmaster.data.CargoHoldObjects;
 import com.harbourmaster.model.Port;
 import java.util.HashSet;
@@ -23,6 +24,7 @@ public final class PortTracker {
     private Port associated;
     private Port start;
     private WorldPoint boatPosition;
+    private BoatSize boatSize = BoatSize.SLOOP;
 
     public void add(GameObject object) {
         if (Port.fromObject(object.getId()) != null
@@ -75,6 +77,7 @@ public final class PortTracker {
     public void update(Client client, Port board) {
         dock = null;
         WorldPoint location = position(client);
+        updateBoatSize(client, location);
         if (location == null && board == null) {
             return;
         }
@@ -90,7 +93,7 @@ public final class PortTracker {
             }
             int approachDistance =
                     boatPosition == null ? Integer.MAX_VALUE : boatPosition.distanceTo(port.navigationLocation);
-            if (atSea && approachDistance > DOCK_APPROACH_DISTANCE) {
+            if (atSea && aboard && approachDistance > DOCK_APPROACH_DISTANCE) {
                 continue;
             }
             int distance = approachDistance <= DOCK_APPROACH_DISTANCE
@@ -127,6 +130,42 @@ public final class PortTracker {
         }
     }
 
+    private void updateBoatSize(Client client, WorldPoint location) {
+        Player player = client.getLocalPlayer();
+        if (player == null) {
+            return;
+        }
+        WorldView playerView = player.getWorldView();
+        if (!playerView.isTopLevel()) {
+            for (GameObject object : objects) {
+                if (CargoHoldObjects.IDS.contains(object.getId()) && object.getWorldView() == playerView) {
+                    boatSize = CargoHoldObjects.boatSizeForObject(object.getId());
+                    return;
+                }
+            }
+            return;
+        }
+        if (location == null) {
+            return;
+        }
+
+        GameObject closestBoat = null;
+        int closestDistance = DOCK_APPROACH_DISTANCE + 1;
+        for (GameObject object : objects) {
+            if (!CargoHoldObjects.IDS.contains(object.getId()) || object.getWorldView() != playerView) {
+                continue;
+            }
+            int distance = location.distanceTo(WorldPoint.fromLocalInstance(client, object.getLocalLocation()));
+            if (distance < closestDistance) {
+                closestDistance = distance;
+                closestBoat = object;
+            }
+        }
+        if (closestBoat != null) {
+            boatSize = CargoHoldObjects.boatSizeForObject(closestBoat.getId());
+        }
+    }
+
     public static WorldPoint position(Client client) {
         return position(client, false);
     }
@@ -155,6 +194,7 @@ public final class PortTracker {
         associated = null;
         start = null;
         boatPosition = null;
+        boatSize = BoatSize.SLOOP;
     }
 
     public List<GameObject> getObjects() {
@@ -167,6 +207,10 @@ public final class PortTracker {
 
     public WorldPoint getBoatPosition() {
         return boatPosition;
+    }
+
+    public BoatSize getBoatSize() {
+        return boatSize;
     }
 
     public Port getStart() {

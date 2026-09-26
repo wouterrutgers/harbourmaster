@@ -1,0 +1,108 @@
+name: Generate sailing routes
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  resolve_cache:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up JDK 11
+        uses: actions/setup-java@v5
+        with:
+          java-version: '11'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Resolve the latest cache id
+        id: cache
+        run: echo "cache_id=$(./gradlew --quiet latestRouteCacheId)" >> "$GITHUB_OUTPUT"
+
+    outputs:
+      cache_id: ${{ steps.cache.outputs.cache_id }}
+
+  generate_routes:
+    needs: resolve_cache
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - boat_size: RAFT
+            file_name: raft
+          - boat_size: SKIFF
+            file_name: skiff
+          - boat_size: SLOOP
+            file_name: sloop
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up JDK 11
+        uses: actions/setup-java@v5
+        with:
+          java-version: '11'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Generate sailing routes
+        env:
+          CACHE_ID: ${{ needs.resolve_cache.outputs.cache_id }}
+          BOAT_SIZE: ${{ matrix.boat_size }}
+        run: ./gradlew generateRoutes -PcacheId="$CACHE_ID" -PboatSize="$BOAT_SIZE"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: route-data-${{ matrix.file_name }}
+          path: src/main/resources/com/harbourmaster/routes/${{ matrix.file_name }}.json
+          if-no-files-found: error
+
+  commit_routes:
+    needs: generate_routes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref }}
+          persist-credentials: true
+
+      - uses: actions/download-artifact@v5
+        with:
+          name: route-data-raft
+          path: src/main/resources/com/harbourmaster/routes
+
+      - uses: actions/download-artifact@v5
+        with:
+          name: route-data-skiff
+          path: src/main/resources/com/harbourmaster/routes
+
+      - uses: actions/download-artifact@v5
+        with:
+          name: route-data-sloop
+          path: src/main/resources/com/harbourmaster/routes
+
+      - name: Commit generated route data
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/main/resources/com/harbourmaster/routes/*.json
+          if git diff --cached --quiet; then
+            echo "No route data changes"
+            exit 0
+          fi
+          git commit -m "update generated sailing routes"
+          git push origin "HEAD:${GITHUB_REF}"
