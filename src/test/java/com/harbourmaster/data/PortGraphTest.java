@@ -6,6 +6,7 @@ import static org.junit.Assert.assertTrue;
 
 import com.harbourmaster.model.Port;
 import com.harbourmaster.model.RouteLeg;
+import com.harbourmaster.model.TravelStep;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -14,6 +15,59 @@ import net.runelite.api.coords.WorldPoint;
 import org.junit.Test;
 
 public class PortGraphTest {
+    @Test
+    public void portalRouteKeepsSeparateSailingPathsAndAdvancesAfterTheJumpWithoutSearchingAgain() {
+        SailingShortcut shortcut = SailingShortcut.GWENITH.get(0);
+        WorldPoint entry = shortcut.approach(BoatSize.SKIFF);
+        WorldPoint start = new WorldPoint(entry.getX(), entry.getY() + 40, 0);
+        int[] searches = {0};
+        PortGraph graph = new PortGraph(new SailingRouter() {
+            @Override
+            public Optional<RouteLeg> route(WorldPoint from, WorldPoint to, BoatSize boatSize) {
+                searches[0]++;
+                return Optional.of(new RouteLeg(null, null, 10000, List.of(from, to)));
+            }
+
+            @Override
+            public Optional<RouteLeg> route(
+                    WorldPoint from, WorldPoint to, BoatSize boatSize, int departure, int arrival) {
+                searches[0]++;
+                if (arrival != -1) {
+                    return Optional.of(new RouteLeg(null, null, from.distanceTo2D(to), List.of(from, to)));
+                }
+                WorldPoint turn = new WorldPoint(to.getX(), from.getY(), 0);
+                return Optional.of(new RouteLeg(
+                        null, null, from.distanceTo2D(turn) + turn.distanceTo2D(to), List.of(from, turn, to)));
+            }
+        });
+        graph.setBoatSize(BoatSize.SKIFF);
+        graph.setShortcuts(true);
+        PortGraph background = graph.detachedSnapshot(start);
+        RouteLeg route = background.routeFromPosition(start, Port.LUNAR_ISLE).orElseThrow();
+        graph.mergeComputedRoutes(background);
+        assertEquals(TravelStep.Kind.PORTAL, route.steps.get(1).kind);
+
+        for (int moved : new int[] {4, 8, 12}) {
+            RouteLeg remaining = graph.routeFromPosition(
+                            new WorldPoint(start.getX(), start.getY() - moved, 0), Port.LUNAR_ISLE)
+                    .orElseThrow();
+            assertEquals(route.distance - moved, remaining.distance, 0);
+            assertEquals(TravelStep.Kind.PORTAL, remaining.steps.get(1).kind);
+            assertFalse(graph.hasMissingRoutes());
+        }
+        WorldPoint exit = shortcut.departure(BoatSize.SKIFF);
+        RouteLeg after = graph.routeFromPosition(new WorldPoint(exit.getX() - 4, exit.getY(), 0), Port.LUNAR_ISLE)
+                .orElseThrow();
+        assertTrue(after.sailingOnly());
+        assertEquals(3, searches[0]);
+
+        graph.setShortcuts(false);
+        assertTrue(graph.detachedSnapshot(null)
+                .route(Port.PRIFDDINAS, Port.LUNAR_ISLE)
+                .orElseThrow()
+                .sailingOnly());
+    }
+
     @Test
     public void returnJourneyReusesTheComputedRouteInReverse() {
         List<BoatSize> searches = new ArrayList<>();
@@ -43,7 +97,7 @@ public class PortGraphTest {
             throw new AssertionError("Precomputed port routes must not search terrain");
         });
         for (BoatSize boatSize : BoatSize.values()) {
-            graph.loadPortRoutes(boatSize, SailingRouteCache.load(boatSize));
+            SailingRouteCache.load(graph, boatSize);
         }
 
         for (BoatSize boatSize : BoatSize.values()) {

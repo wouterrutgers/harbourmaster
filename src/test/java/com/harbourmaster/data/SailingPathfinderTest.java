@@ -26,6 +26,17 @@ import org.junit.Test;
 
 public class SailingPathfinderTest {
     @Test
+    public void portalApproachRetainsItsRequiredHeading() {
+        SailingPathfinder pathfinder = pathfinder(0, 63, 0, 63, Map.of(0, terrain(0, 0, 0, 63, 0, 63, Set.of())));
+        RouteLeg route = pathfinder
+                .route(point(10, 30), point(40, 30), BoatSize.SKIFF, -1, 6)
+                .orElseThrow(AssertionError::new);
+        WorldPoint previous = route.points.get(route.points.size() - 2);
+        assertEquals(40, previous.getX());
+        assertTrue(previous.getY() > 30);
+    }
+
+    @Test
     public void savedRouteRefinementFindsEarlierTurningPointsAroundAnIsland() {
         Set<Long> land = new HashSet<>();
         for (int x = 25; x <= 35; x++) {

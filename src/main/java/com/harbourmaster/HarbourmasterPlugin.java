@@ -13,6 +13,8 @@ import com.harbourmaster.model.DockChecklist;
 import com.harbourmaster.model.HarbourmasterSnapshot;
 import com.harbourmaster.model.Port;
 import com.harbourmaster.model.RoutePlan;
+import com.harbourmaster.model.TravelContext;
+import com.harbourmaster.model.TravelStep;
 import com.harbourmaster.optimizer.CourierCyclePlanner;
 import com.harbourmaster.optimizer.RouteOptimizer;
 import com.harbourmaster.overlay.CargoOverlay;
@@ -29,6 +31,7 @@ import com.harbourmaster.tracker.NoticeboardTracker;
 import com.harbourmaster.tracker.OfferCycleTracker;
 import com.harbourmaster.tracker.PortTracker;
 import com.harbourmaster.tracker.RouteTracker;
+import com.harbourmaster.tracker.TravelTracker;
 import java.time.Clock;
 import java.util.Arrays;
 import java.util.List;
@@ -117,6 +120,10 @@ public class HarbourmasterPlugin extends Plugin {
     private RouteTracker routeTracker;
     private CourierCyclePlanner cyclePlanner;
     private final OfferCycleTracker offerCycles = new OfferCycleTracker();
+    private final TravelTracker travelTracker = new TravelTracker();
+    private TravelContext travelContext;
+    private Port planStart;
+
     private volatile HarbourmasterSnapshot snapshot = HarbourmasterSnapshot.empty();
     private volatile boolean running;
     private List<Object> previousInputs;
@@ -230,6 +237,8 @@ public class HarbourmasterPlugin extends Plugin {
         guidanceActivity.clear();
         guidanceActive = false;
         ports.clear();
+        travelTracker.clear();
+        travelContext = null;
         noticeboard.clear();
         offerCycles.clear();
         clearPlan();
@@ -265,16 +274,30 @@ public class HarbourmasterPlugin extends Plugin {
         }
         noticeboard.scan(client, catalog);
         ports.update(client, noticeboard.isOpen() ? noticeboard.getPort() : null);
-        if (portGraph.setBoatSize(ports.getBoatSize())) {
-            clearPlan();
-        }
         List<ActiveTask> held = activeTasks.read(
                 client::getVarbitValue, client::getVarpValue, catalog::byId, catalog::isIgnoredTask, ports.getStart());
+        TravelContext availableTravel = config.useTeleports() ? travelTracker.read(client, held) : null;
+        if (!java.util.Objects.equals(travelContext, availableTravel)) {
+            clearPlan();
+            travelContext = availableTravel;
+        }
+        BoatSize routeBoatSize =
+                travelContext != null && travelContext.boatSize != null ? travelContext.boatSize : ports.getBoatSize();
+        if (portGraph.setBoatSize(routeBoatSize)) {
+            clearPlan();
+            previousInputs = null;
+        }
+        planStart = travelContext == null ? ports.getStart() : travelTracker.playerPort(client, ports, travelContext);
+        if (portGraph.setShortcuts(travelTracker.shortcutsAvailable(client, travelContext))) {
+            clearPlan();
+            previousInputs = null;
+        }
         guidanceActive = guidanceActivity.update(
                         held.stream().anyMatch(task -> !task.isFinished()),
                         noticeboard.isOpen() || noticeboard.isDetailsOpen() || noticeboard.isOpeningDetails(),
                         clock.instant())
-                && (ports.getDock() != null
+                && (travelContext != null
+                        || ports.getDock() != null
                         || client.getLocalPlayer() != null
                                 && !client.getLocalPlayer().getWorldView().isTopLevel());
         int completedTasks = client.getVarbitValue(VarbitID.PORT_TASKS_COMPLETED_TODAY);
@@ -293,17 +316,18 @@ public class HarbourmasterPlugin extends Plugin {
                 noticeboard.getOffers(),
                 noticeboard.getPort(),
                 noticeboard.isOpen(),
-                ports.getStart(),
+                planStart,
                 ports.getBoatPosition(),
                 ports.getDock(),
-                ports.getBoatSize(),
+                routeBoatSize,
                 level,
                 freeSlots,
                 depositCargo,
                 config.enableOptimizer(),
                 config.rankOffers(),
                 completedTasks,
-                observedOffers);
+                observedOffers,
+                travelContext);
         if (inputs.equals(previousInputs)) {
             return;
         }
@@ -340,10 +364,11 @@ public class HarbourmasterPlugin extends Plugin {
                 observedOffers,
                 level,
                 freeSlots,
-                ports.getStart(),
+                planStart,
                 ports.getBoatSize(),
                 config.rankOffers(),
-                tasksUntilReset);
+                tasksUntilReset,
+                travelContext);
         if (!inputs.equals(previousPlanInputs)
                 || pendingPlanRequest != null
                         && pendingPlanRequest.boatPosition != null
@@ -355,10 +380,20 @@ public class HarbourmasterPlugin extends Plugin {
             return previousCourierPlan;
         }
 
-        CourierPlan plan = previousCourierPlan.selectedOffers.isEmpty()
+        if (travelContext != null
+                && (ports.getBoatPosition() == null
+                        || previousCourierPlan.route.legs.stream()
+                                .findFirst()
+                                .map(leg -> leg.steps.stream()
+                                        .anyMatch(step -> step.kind != TravelStep.Kind.SAIL
+                                                && step.kind != TravelStep.Kind.PORTAL))
+                                .orElse(true))) {
+            return previousCourierPlan;
+        }
+        CourierPlan plan = travelContext == null && previousCourierPlan.selectedOffers.isEmpty()
                 ? cyclePlanner.withRoute(
-                        previousCourierPlan, routeTracker.update(ports.getStart(), ports.getBoatPosition(), held))
-                : cyclePlanner.relocate(previousCourierPlan, ports.getStart(), ports.getBoatPosition());
+                        previousCourierPlan, routeTracker.update(planStart, ports.getBoatPosition(), held))
+                : cyclePlanner.relocate(previousCourierPlan, planStart, ports.getBoatPosition());
         if (portGraph.hasMissingRoutes()) {
             portGraph.clearMissingRoutes();
             requestPlan(
@@ -391,7 +426,7 @@ public class HarbourmasterPlugin extends Plugin {
                 IndexDataBase mapIndex = client.getIndex(SailingPathfinder.MAP_INDEX_ID);
                 portGraph = new PortGraph(new SailingPathfinder(mapIndex, task -> clientThread.invokeLater(task)));
                 for (BoatSize boatSize : BoatSize.values()) {
-                    portGraph.loadPortRoutes(boatSize, SailingRouteCache.load(boatSize));
+                    SailingRouteCache.load(portGraph, boatSize);
                 }
                 RouteOptimizer optimizer = new RouteOptimizer(portGraph);
                 routeTracker = new RouteTracker(optimizer);
@@ -410,7 +445,7 @@ public class HarbourmasterPlugin extends Plugin {
             int tasksUntilReset,
             CourierPlan routeToUpdate) {
         CourierPlanRequest request = new CourierPlanRequest(
-                ports.getStart(),
+                planStart,
                 ports.getBoatPosition(),
                 held,
                 config.rankOffers() ? observedOffers : Map.of(),
@@ -418,7 +453,8 @@ public class HarbourmasterPlugin extends Plugin {
                 freeSlots,
                 tasksUntilReset,
                 routeToUpdate,
-                config.rankOffers() ? retainedOffers(held, observedOffers, level) : List.of());
+                config.rankOffers() ? retainedOffers(held, observedOffers, level) : List.of(),
+                travelContext);
         if (planningTask != null) {
             planningTask.cancel(true);
         }
@@ -426,7 +462,8 @@ public class HarbourmasterPlugin extends Plugin {
         PortGraph routeSnapshot = portGraph.detachedSnapshot(request.boatPosition);
         planningTask = plannerExecutor.submit(() -> {
             try {
-                CourierCyclePlanner planner = new CourierCyclePlanner(new RouteOptimizer(routeSnapshot));
+                CourierCyclePlanner planner =
+                        new CourierCyclePlanner(new RouteOptimizer(routeSnapshot, request.travel));
                 CourierPlan plan = request.routeToUpdate == null
                         ? planner.plan(
                                 request.start,
@@ -475,7 +512,7 @@ public class HarbourmasterPlugin extends Plugin {
         }
         portGraph.mergeComputedRoutes(routeSnapshot);
         if (request.routeToUpdate == null) {
-            if (plan.selectedOffers.isEmpty()) {
+            if (request.travel == null && plan.selectedOffers.isEmpty()) {
                 routeTracker.update(request.start, request.boatPosition, request.held);
             }
             previousCourierPlan = plan;
@@ -508,6 +545,7 @@ public class HarbourmasterPlugin extends Plugin {
         private final int tasksUntilReset;
         private final CourierPlan routeToUpdate;
         private final List<CourierTask> retainedOffers;
+        private final TravelContext travel;
 
         private CourierPlanRequest(
                 Port start,
@@ -518,7 +556,8 @@ public class HarbourmasterPlugin extends Plugin {
                 int freeSlots,
                 int tasksUntilReset,
                 CourierPlan routeToUpdate,
-                List<CourierTask> retainedOffers) {
+                List<CourierTask> retainedOffers,
+                TravelContext travel) {
             this.start = start;
             this.boatPosition = boatPosition;
             this.held = held;
@@ -528,6 +567,7 @@ public class HarbourmasterPlugin extends Plugin {
             this.tasksUntilReset = tasksUntilReset;
             this.routeToUpdate = routeToUpdate;
             this.retainedOffers = retainedOffers;
+            this.travel = travel;
         }
     }
 
@@ -551,7 +591,9 @@ public class HarbourmasterPlugin extends Plugin {
     }
 
     public boolean shouldUnloadCargo() {
-        return isGuidanceActive() && cargo.needsUnload(client, snapshot.cargo);
+        return isGuidanceActive()
+                && (travelContext == null || snapshot.dock.hasUnload())
+                && cargo.needsUnload(client, snapshot.cargo);
     }
 
     public boolean hasReadNoticeboard(Port port) {

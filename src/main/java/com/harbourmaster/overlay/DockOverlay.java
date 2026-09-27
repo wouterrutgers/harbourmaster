@@ -62,7 +62,7 @@ public final class DockOverlay extends Overlay {
             if (config.highlightGangplank() && state.dock.port != null) {
                 boolean gangplank = object.getId() == ObjectID.SAILING_GANGPLANK_PROXY
                         || port == state.dock.port && object.getId() == port.gangplankObject;
-                boolean boarding = (state.depositCargo || fetchCargo || state.currentLeg != null && !checkNoticeboard)
+                boolean boarding = (state.depositCargo || fetchCargo || state.sailingNext() && !checkNoticeboard)
                         && playerWorld.isTopLevel()
                         && gangplank
                         && object.getWorldView().isTopLevel();

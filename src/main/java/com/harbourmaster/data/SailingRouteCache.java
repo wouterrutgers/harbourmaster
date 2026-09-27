@@ -19,12 +19,12 @@ import java.util.Set;
 import net.runelite.api.coords.WorldPoint;
 
 public final class SailingRouteCache {
-    private static final int FORMAT_VERSION = 1;
+    private static final int FORMAT_VERSION = 2;
     private static final Gson GSON = new Gson();
 
     private SailingRouteCache() {}
 
-    public static Map<Integer, Optional<RouteLeg>> load(BoatSize boatSize) {
+    public static void load(PortGraph graph, BoatSize boatSize) {
         String resource = "/com/harbourmaster/routes/" + boatSize.name().toLowerCase(Locale.ROOT) + ".json";
         InputStream source = SailingRouteCache.class.getResourceAsStream(resource);
         if (source == null) {
@@ -33,7 +33,7 @@ public final class SailingRouteCache {
         try (InputStream input = source;
                 InputStreamReader reader = new InputStreamReader(input, StandardCharsets.UTF_8)) {
             RouteFile file = GSON.fromJson(reader, RouteFile.class);
-            return routes(file, boatSize, resource);
+            graph.loadRoutes(boatSize, routes(file, boatSize, resource), portalRoutes(file, boatSize, resource));
         } catch (IOException exception) {
             throw new IllegalStateException("Unable to read generated sailing routes: " + resource, exception);
         }
@@ -83,6 +83,49 @@ public final class SailingRouteCache {
         return Map.copyOf(routes);
     }
 
+    private static Map<List<Object>, Optional<RouteLeg>> portalRoutes(
+            RouteFile file, BoatSize boatSize, String resource) {
+        Set<List<Object>> expected = new HashSet<>();
+        for (SailingShortcut shortcut : SailingShortcut.GWENITH) {
+            for (Port port : Port.values()) {
+                expected.add(List.of(
+                        port.navigationLocation, shortcut.approach(boatSize), -1, shortcut.entryHeading, false));
+                expected.add(List.of(
+                        shortcut.departure(boatSize), port.navigationLocation, shortcut.exitHeading, -1, false));
+            }
+        }
+        Map<List<Object>, Optional<RouteLeg>> routes = new HashMap<>();
+        for (PortalEntry entry : file.portalRoutes) {
+            WorldPoint from = point(entry.from);
+            WorldPoint to = point(entry.to);
+            List<Object> key = List.of(from, to, entry.departure, entry.arrival, false);
+            if (!expected.remove(key)) {
+                throw new IllegalStateException("Unexpected or duplicate portal route: " + resource);
+            }
+            if (entry.distance == null) {
+                if (entry.points.length != 0) {
+                    throw new IllegalStateException("Invalid unreachable portal route: " + resource);
+                }
+                routes.put(key, Optional.empty());
+                continue;
+            }
+            if (entry.points.length < 2
+                    || !point(entry.points[0]).equals(from)
+                    || !point(entry.points[entry.points.length - 1]).equals(to)) {
+                throw new IllegalStateException("Invalid portal route endpoints: " + resource);
+            }
+            List<WorldPoint> points = new ArrayList<>();
+            for (int[] coordinates : entry.points) {
+                points.add(point(coordinates));
+            }
+            routes.put(key, Optional.of(new RouteLeg(null, null, entry.distance, points)));
+        }
+        if (!expected.isEmpty()) {
+            throw new IllegalStateException("Incomplete portal route data: " + resource);
+        }
+        return Map.copyOf(routes);
+    }
+
     private static WorldPoint point(int[] coordinates) {
         return new WorldPoint(coordinates[0], coordinates[1], 0);
     }
@@ -91,6 +134,7 @@ public final class SailingRouteCache {
         private int formatVersion;
         private String boatSize;
         private List<RouteEntry> routes;
+        private List<PortalEntry> portalRoutes;
     }
 
     private static final class RouteEntry {
@@ -98,5 +142,14 @@ public final class SailingRouteCache {
         private String to;
         private Double distance;
         private int[][] points = new int[0][];
+    }
+
+    private static final class PortalEntry {
+        private int[] from;
+        private int[] to;
+        private int departure;
+        private int arrival;
+        private Double distance;
+        private int[][] points;
     }
 }

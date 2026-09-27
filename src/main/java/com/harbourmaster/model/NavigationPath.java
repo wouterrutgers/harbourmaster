@@ -9,11 +9,15 @@ public final class NavigationPath {
     public final List<Sample> points;
 
     public NavigationPath(RouteLeg leg) {
+        this(leg, leg.points);
+    }
+
+    public NavigationPath(RouteLeg leg, List<WorldPoint> points) {
         this.leg = leg;
         List<Sample> sampled = new ArrayList<>();
-        for (int index = 1; index < leg.points.size(); index++) {
-            WorldPoint from = leg.points.get(index - 1);
-            WorldPoint to = leg.points.get(index);
+        for (int index = 1; index < points.size(); index++) {
+            WorldPoint from = points.get(index - 1);
+            WorldPoint to = points.get(index);
             int count = Math.max(1, (int) Math.ceil(Math.hypot(to.getX() - from.getX(), to.getY() - from.getY()) / 4));
             for (int step = 0; step < count; step++) {
                 double fraction = (double) step / count;
@@ -23,11 +27,11 @@ public final class NavigationPath {
                         from.getPlane()));
             }
         }
-        if (!leg.points.isEmpty()) {
-            WorldPoint last = leg.points.get(leg.points.size() - 1);
+        if (!points.isEmpty()) {
+            WorldPoint last = points.get(points.size() - 1);
             sampled.add(new Sample(last.getX(), last.getY(), last.getPlane()));
         }
-        points = List.copyOf(sampled);
+        this.points = List.copyOf(sampled);
     }
 
     public static final class Sample {

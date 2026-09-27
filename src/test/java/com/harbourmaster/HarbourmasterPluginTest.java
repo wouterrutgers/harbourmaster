@@ -6,6 +6,7 @@ import static org.junit.Assert.*;
 import com.harbourmaster.data.PortGraph;
 import com.harbourmaster.data.PortTaskCatalog;
 import com.harbourmaster.model.CourierTask;
+import com.harbourmaster.model.Port;
 import com.harbourmaster.model.RouteEvent;
 import com.harbourmaster.model.RouteLeg;
 import com.harbourmaster.optimizer.CourierCyclePlanner;
@@ -44,6 +45,7 @@ import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
+import net.runelite.api.gameval.ItemID;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
@@ -60,6 +62,8 @@ public class HarbourmasterPluginTest {
     private WorldPoint location = A.navigationLocation;
     private WorldPoint blockedPosition;
     private boolean aboard;
+    private boolean useTeleports;
+    private Item[] travelItems = new Item[0];
     private boolean boardOpen;
     private boolean detailsOpen;
     private Item carried;
@@ -148,6 +152,9 @@ public class HarbourmasterPluginTest {
         }
     });
     private final ItemContainer equipment = ApiStub.of(ItemContainer.class, (method, arguments) -> {
+        if (method.equals("getItems")) {
+            return carried == null ? new Item[0] : new Item[] {carried};
+        }
         if (method.equals("getItem")) {
             assertEquals(EquipmentInventorySlot.WEAPON.getSlotIdx(), arguments[0]);
             return carried;
@@ -163,7 +170,25 @@ public class HarbourmasterPluginTest {
                     return board;
                 }
                 return arguments[0].equals(InterfaceID.PortTaskInfo.WINDOW) ? details : null;
+            case "getDBTableField":
+                return new Object[] {
+                    Port.fromDatabaseRow((Integer) arguments[0]).ordinal()
+                };
+            case "getBoostedSkillLevel":
+                return 99;
             case "getItemContainer":
+                if (arguments[0].equals(InventoryID.INV)) {
+                    return ApiStub.of(ItemContainer.class, (operation, parameters) -> {
+                        assertEquals("getItems", operation);
+                        return travelItems;
+                    });
+                }
+                if (arguments[0].equals(InventoryID.SAILING_BOAT_1_CARGOHOLD)) {
+                    return ApiStub.of(ItemContainer.class, (operation, parameters) -> {
+                        assertEquals("getItems", operation);
+                        return new Item[0];
+                    });
+                }
                 assertEquals(InventoryID.WORN, arguments[0]);
                 return equipment;
             case "getVarbitValue":
@@ -210,7 +235,12 @@ public class HarbourmasterPluginTest {
         field(catalog, "byRow").set(catalog, Map.of(task.databaseRow, task));
         field(plugin, "client").set(plugin, client);
         field(plugin, "catalog").set(plugin, catalog);
-        field(plugin, "config").set(plugin, new HarbourmasterConfig() {});
+        field(plugin, "config").set(plugin, new HarbourmasterConfig() {
+            @Override
+            public boolean useTeleports() {
+                return useTeleports;
+            }
+        });
         field(plugin, "running").set(plugin, true);
         field(plugin, "portGraph").set(plugin, graph);
         field(plugin, "routeTracker").set(plugin, new RouteTracker(optimizer));
@@ -227,6 +257,36 @@ public class HarbourmasterPluginTest {
     @After
     public void shutDown() {
         planner.shutdownNow();
+    }
+
+    @Test
+    public void suppliesChangingDuringPlanningDiscardTheObsoleteTeleportRoute()
+            throws ReflectiveOperationException, InterruptedException {
+        dock();
+        useTeleports = true;
+        varbits.put(VarbitID.SAILING_INTRO, 50);
+        CourierTask delivery = courier(1, Port.ALDARIN, D, 1000);
+        PortTaskCatalog catalog = (PortTaskCatalog) field(plugin, "catalog").get(plugin);
+        field(catalog, "byId").set(catalog, Map.of(delivery.id, delivery));
+        varbits.put(TaskVarbits.IDS[0], delivery.id);
+        varbits.put(VarbitID.SAILING_LAST_PERSONAL_BOAT_BOARDED, 1);
+        varbits.put(VarbitID.SAILING_BOAT_1_OWNED, 1);
+        varbits.put(VarbitID.SAILING_BOAT_1_PORT, B.ordinal());
+        varbits.put(VarbitID.SAILING_BOAT_1_TELEPORT_FOCUS, 1);
+        varbits.put(VarbitID.VARLAMORE_VISITED, 1);
+        travelItems =
+                new Item[] {new Item(ItemID.NZONE_TELETAB_ALDARIN, 1), new Item(ItemID.POH_TABLET_TELEPORTBOATTOME, 1)};
+        plugin.onGameTick(new GameTick());
+        Runnable obsolete = callbacks.poll(5, TimeUnit.SECONDS);
+        assertNotNull(obsolete);
+
+        travelItems = new Item[0];
+        plugin.onGameTick(new GameTick());
+        obsolete.run();
+        assertTrue(plugin.getSnapshot().route.legs.isEmpty());
+        publishPlan();
+        assertTrue(plugin.getSnapshot().route.available);
+        assertTrue(plugin.getSnapshot().route.legs.stream().allMatch(RouteLeg::sailingOnly));
     }
 
     @Test

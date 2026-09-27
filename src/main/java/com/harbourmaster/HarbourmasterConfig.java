@@ -67,6 +67,17 @@ public interface HarbourmasterConfig extends Config {
     }
 
     @ConfigItem(
+            keyName = "useTeleports",
+            name = "Use teleports and charter ships",
+            description =
+                    "Use detected travel methods to visit boards and reposition an empty boat. Requires available supplies.",
+            section = route,
+            position = 8)
+    default boolean useTeleports() {
+        return false;
+    }
+
+    @ConfigItem(
             keyName = "showRouteOverlay",
             name = "Show route status",
             description = "Show the next destination and action while sailing.",

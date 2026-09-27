@@ -4,6 +4,7 @@ import com.harbourmaster.HarbourmasterConfig;
 import com.harbourmaster.HarbourmasterPlugin;
 import com.harbourmaster.model.HarbourmasterSnapshot;
 import com.harbourmaster.model.RouteLeg;
+import com.harbourmaster.model.TravelStep;
 import java.awt.BasicStroke;
 import java.awt.Dimension;
 import java.awt.Graphics2D;
@@ -68,21 +69,31 @@ public final class WorldMapRouteOverlay extends Overlay {
             }
             drawing.setColor(current ? config.activeRouteColor() : config.futureRouteColor());
             drawing.setStroke(new BasicStroke(current ? 3 : 1.5f));
-            Point previous = null;
-            for (WorldPoint point : legs.get(index).points) {
-                Point canvas = projection.mapWorldPointToGraphicsPoint(point);
-                if (canvas != null && previous != null) {
-                    NavigationOverlay.drawSegment(
-                            drawing,
-                            previous,
-                            canvas,
-                            Math.hypot(canvas.getX() - previous.getX(), canvas.getY() - previous.getY()) > 35);
+            for (TravelStep step : legs.get(index).steps) {
+                Point previous = null;
+                for (WorldPoint point : step.points) {
+                    Point canvas = projection.mapWorldPointToGraphicsPoint(point);
+                    if (canvas != null && previous != null && step.kind == TravelStep.Kind.SAIL) {
+                        NavigationOverlay.drawSegment(
+                                drawing,
+                                previous,
+                                canvas,
+                                Math.hypot(canvas.getX() - previous.getX(), canvas.getY() - previous.getY()) > 35);
+                    }
+                    if (canvas != null && step.kind != TravelStep.Kind.SAIL) {
+                        drawing.drawOval(canvas.getX() - 4, canvas.getY() - 4, 8, 8);
+                    }
+                    previous = canvas;
                 }
-                previous = canvas;
-            }
-            if (previous != null) {
-                drawing.fillOval(previous.getX() - 4, previous.getY() - 4, 8, 8);
-                drawing.drawString(legs.get(index).to.name, previous.getX() + 7, previous.getY());
+                if (previous != null) {
+                    drawing.fillOval(previous.getX() - 3, previous.getY() - 3, 6, 6);
+                    drawing.drawString(
+                            step.kind == TravelStep.Kind.SAIL && legs.get(index).sailingOnly()
+                                    ? legs.get(index).to.name
+                                    : step.instruction,
+                            previous.getX() + 7,
+                            previous.getY());
+                }
             }
         }
         drawing.dispose();

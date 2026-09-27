@@ -4,6 +4,8 @@ import com.harbourmaster.HarbourmasterConfig;
 import com.harbourmaster.HarbourmasterPlugin;
 import com.harbourmaster.model.HarbourmasterSnapshot;
 import com.harbourmaster.model.RouteEvent;
+import com.harbourmaster.model.RouteLeg;
+import com.harbourmaster.model.TravelStep;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Graphics2D;
@@ -33,7 +35,23 @@ public final class RouteStatusOverlay extends OverlayPanel {
             return null;
         }
         panelComponent.getChildren().clear();
-        if (plugin.shouldUnloadCargo() && config.showDockChecklist()) {
+        if (config.showRouteOverlay() && state.currentLeg != null && !state.currentLeg.sailingOnly()) {
+            int next = state.currentLeg.steps.get(0).kind == TravelStep.Kind.SAIL
+                            && state.currentLeg.steps.get(0).points.size() == 1
+                    ? 1
+                    : 0;
+            TravelStep step = state.currentLeg.steps.get(next);
+            title("Travel to " + state.nextPort().name, config.activeRouteColor());
+            if (state.dock.port == null
+                    && (step.kind == TravelStep.Kind.SUMMON || step.kind == TravelStep.Kind.CHARTER)) {
+                line("Go to " + state.currentLeg.from.name + " dock", Color.WHITE);
+            }
+            line(step.instruction, Color.WHITE);
+            if (state.currentLeg.steps.size() > next + 1) {
+                line(state.currentLeg.steps.get(next + 1).instruction, Color.WHITE);
+            }
+            estimatedTravelTime(state.currentLeg);
+        } else if (plugin.shouldUnloadCargo() && config.showDockChecklist()) {
             title(state.dock.port.name + " dock", config.activeRouteColor());
             line("Unload task cargo", config.unloadColor());
             line("Take delivery crates before going ashore", Color.WHITE);
@@ -53,19 +71,19 @@ public final class RouteStatusOverlay extends OverlayPanel {
             line("Finish these actions before sailing", Color.WHITE);
         } else if (config.showRouteOverlay() && !state.route.stops.isEmpty()) {
             title(
-                    state.currentLeg == null
-                            ? state.nextPort().name
-                            : String.format(
-                                    Locale.ENGLISH,
-                                    "%,.0f tiles to %s",
-                                    state.currentLeg.distance,
-                                    state.nextPort().name),
+                    state.currentLeg == null ? state.nextPort().name : "Travel to " + state.nextPort().name,
                     config.activeRouteColor());
             for (RouteEvent action : state.route.nextActions()) {
                 line(action.description(), Color.WHITE);
             }
             if (state.currentLeg == null) {
-                line("Complete this stop before sailing", Color.WHITE);
+                line(
+                        state.dock.port == state.nextPort()
+                                ? "Complete this stop before sailing"
+                                : "Go to " + state.nextPort().name + " dock",
+                        Color.WHITE);
+            } else {
+                estimatedTravelTime(state.currentLeg);
             }
         } else if (config.showRouteOverlay() && !state.route.available) {
             title("Route unavailable", config.activeRouteColor());
@@ -77,6 +95,13 @@ public final class RouteStatusOverlay extends OverlayPanel {
             return null;
         }
         return super.render(graphics);
+    }
+
+    private void estimatedTravelTime(RouteLeg leg) {
+        long seconds = (long) Math.ceil(leg.travelTicks() * 0.6);
+        line(
+                String.format(Locale.ENGLISH, "Estimated travel: %dm %02ds", seconds / 60, seconds % 60),
+                Color.LIGHT_GRAY);
     }
 
     private void title(String text, Color color) {

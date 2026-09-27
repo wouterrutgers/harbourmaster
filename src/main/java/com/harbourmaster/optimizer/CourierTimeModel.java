@@ -5,9 +5,6 @@ import com.harbourmaster.model.RoutePlan;
 import com.harbourmaster.model.RouteStop;
 
 final class CourierTimeModel {
-    private static final double BEST_SAILING_TILES_PER_TICK = 4;
-    private static final double BOARDING_TICKS = 1;
-    private static final double UNBOARDING_TICKS = 1;
     private static final double TICKS_PER_HOUR = 6000;
 
     public double experiencePerHour(RoutePlan route, int experience) {
@@ -24,7 +21,6 @@ final class CourierTimeModel {
     }
 
     static double travelTicks(RouteLeg leg) {
-        return leg.distance / BEST_SAILING_TILES_PER_TICK
-                + (leg.from == leg.to ? 0 : BOARDING_TICKS + UNBOARDING_TICKS);
+        return leg.travelTicks();
     }
 }
