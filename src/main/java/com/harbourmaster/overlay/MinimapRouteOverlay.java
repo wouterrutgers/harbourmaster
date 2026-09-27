@@ -31,7 +31,7 @@ public final class MinimapRouteOverlay extends Overlay {
 
     @Override
     public Dimension render(Graphics2D graphics) {
-        if (!config.showMinimap()) {
+        if (!plugin.isGuidanceActive() || !config.showMinimap()) {
             return null;
         }
         Widget minimap = client.getWidget(

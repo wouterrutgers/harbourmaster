@@ -35,7 +35,7 @@ public final class NavigationOverlay extends Overlay {
 
     @Override
     public Dimension render(Graphics2D graphics) {
-        if (!config.showWorldRoute()) {
+        if (!plugin.isGuidanceActive() || !config.showWorldRoute()) {
             return null;
         }
         Graphics2D drawing = (Graphics2D) graphics.create();

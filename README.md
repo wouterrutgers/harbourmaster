@@ -10,6 +10,8 @@ Harbourmaster helps you earn Sailing XP efficiently from courier tasks by recomm
 
 Follow the displayed order at each dock. Sometimes the plugin will suggest accepting an offer before delivering cargo, so you can take it before the boards refresh.
 
+Automatic guidance appears while you have courier tasks and are aboard a boat or at a dock. It stays available for 60 seconds after completing or cancelling your last task. Opening a noticeboard also activates guidance while you browse it and for 60 seconds after closing it. Leaving the boat or dock hides guidance immediately.
+
 Recommendations account for your Sailing level, available task slots and existing tasks. Open noticeboards as you visit ports so their offers can be included in your plan. The plugin remembers those offers until the boards refresh.
 
 Routes use your boat, with no teleports or charters.

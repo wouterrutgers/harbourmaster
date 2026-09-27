@@ -49,7 +49,7 @@ public final class DockOverlay extends Overlay {
 
     @Override
     public Dimension render(Graphics2D graphics) {
-        if (client.getLocalPlayer() == null) {
+        if (!plugin.isGuidanceActive() || client.getLocalPlayer() == null) {
             return null;
         }
         HarbourmasterSnapshot state = plugin.getSnapshot();

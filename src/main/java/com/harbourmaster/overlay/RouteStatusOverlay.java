@@ -29,7 +29,7 @@ public final class RouteStatusOverlay extends OverlayPanel {
     @Override
     public Dimension render(Graphics2D graphics) {
         HarbourmasterSnapshot state = plugin.getSnapshot();
-        if (!state.loggedIn || state.boardOpen) {
+        if (!plugin.isGuidanceActive() || !state.loggedIn || state.boardOpen) {
             return null;
         }
         panelComponent.getChildren().clear();

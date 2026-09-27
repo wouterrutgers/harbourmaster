@@ -39,6 +39,7 @@ public class DockOverlayTest {
     private Item carried;
     private Port dock = A;
     private RoutePlan route = RoutePlan.empty();
+    private boolean guidanceActive = true;
     private final WorldView boat = boat();
     private WorldView playerWorld = boat;
     private final Player player = ApiStub.of(Player.class, (method, arguments) -> {
@@ -66,6 +67,11 @@ public class DockOverlayTest {
         }
     });
     private final HarbourmasterPlugin plugin = new HarbourmasterPlugin() {
+        @Override
+        public boolean isGuidanceActive() {
+            return guidanceActive;
+        }
+
         @Override
         public HarbourmasterSnapshot getSnapshot() {
             Map<Integer, CargoTracker.Destination> destinations = cargo.destinations(tasks, dock);
@@ -165,6 +171,18 @@ public class DockOverlayTest {
         route = new RouteOptimizer(line()).optimize(A, tasks);
 
         assertNotEquals(0, render().getRGB(20, 20));
+    }
+
+    @Test
+    public void inactiveGuidanceHidesNoticeboardsAndCargoHighlights() {
+        plugin.getPorts().add(object(world(true), A.noticeboardObject, 10));
+        plugin.getPorts().add(hold(boat, 70));
+        carried = new Item(tasks.get(0).definition.itemId, 1);
+        guidanceActive = false;
+
+        BufferedImage image = render();
+        assertEquals(0, image.getRGB(20, 20));
+        assertEquals(0, image.getRGB(80, 20));
     }
 
     private BufferedImage render() {

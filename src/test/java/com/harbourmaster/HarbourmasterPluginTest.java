@@ -14,6 +14,9 @@ import com.harbourmaster.tracker.OfferCycleTracker;
 import com.harbourmaster.tracker.RouteTracker;
 import com.harbourmaster.tracker.TaskVarbits;
 import java.lang.reflect.Field;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -34,8 +37,11 @@ import net.runelite.api.WorldEntity;
 import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
+import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.VarbitID;
+import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
 import org.junit.After;
 import org.junit.Before;
@@ -50,10 +56,34 @@ public class HarbourmasterPluginTest {
     private WorldPoint location = A.navigationLocation;
     private WorldPoint blockedPosition;
     private boolean aboard;
+    private boolean boardOpen;
+    private boolean detailsOpen;
     private WorldPoint stalledPosition;
     private final CountDownLatch searchStarted = new CountDownLatch(1);
     private final CountDownLatch searchCancelled = new CountDownLatch(1);
     private int routeSearches;
+    private final Widget boardEntry = ApiStub.of(Widget.class, (method, arguments) -> {
+        if (method.equals("getOnOpListener")) {
+            return new Object[] {1, 2, 3, task.databaseRow};
+        }
+        throw new AssertionError(method);
+    });
+    private final Widget board = ApiStub.of(Widget.class, (method, arguments) -> {
+        switch (method) {
+            case "isHidden":
+                return !boardOpen;
+            case "getDynamicChildren":
+                return new Widget[] {boardEntry};
+            default:
+                throw new AssertionError(method);
+        }
+    });
+    private final Widget details = ApiStub.of(Widget.class, (method, arguments) -> {
+        if (method.equals("isHidden")) {
+            return !detailsOpen;
+        }
+        throw new AssertionError(method);
+    });
     private final WorldView boat = ApiStub.of(WorldView.class, (method, arguments) -> {
         switch (method) {
             case "isTopLevel":
@@ -117,6 +147,10 @@ public class HarbourmasterPluginTest {
             case "getGameState":
                 return GameState.LOGGED_IN;
             case "getWidget":
+                if (arguments[0].equals(InterfaceID.PortTaskBoard.CONTAINER)) {
+                    return board;
+                }
+                return arguments[0].equals(InterfaceID.PortTaskInfo.WINDOW) ? details : null;
             case "getItemContainer":
                 return null;
             case "getVarbitValue":
@@ -160,6 +194,7 @@ public class HarbourmasterPluginTest {
         PortTaskCatalog catalog = new PortTaskCatalog();
         field(catalog, "loaded").set(catalog, true);
         field(catalog, "byId").set(catalog, Map.of(task.id, task));
+        field(catalog, "byRow").set(catalog, Map.of(task.databaseRow, task));
         field(plugin, "client").set(plugin, client);
         field(plugin, "catalog").set(plugin, catalog);
         field(plugin, "config").set(plugin, new HarbourmasterConfig() {});
@@ -351,6 +386,107 @@ public class HarbourmasterPluginTest {
         assertFalse(plugin.isCalculatingPlan());
         assertEquals(B, plugin.getSnapshot().route.stops.get(0).port);
         assertTrue(callbacks.isEmpty());
+    }
+
+    @Test
+    public void guidanceRequiresABoatOrDockAndExpiresAfterTheLastTask() throws ReflectiveOperationException {
+        dock();
+        tickAt(0);
+        assertFalse(plugin.isGuidanceActive());
+
+        varbits.put(TaskVarbits.IDS[0], task.id);
+        tickAt(1);
+        assertTrue(plugin.isGuidanceActive());
+
+        plugin.getPorts().clear();
+        tickAt(2);
+        assertFalse(plugin.isGuidanceActive());
+
+        aboard = true;
+        tickAt(100);
+        assertTrue(plugin.isGuidanceActive());
+
+        varbits.put(TaskVarbits.TAKEN[0], task.quantity);
+        varbits.put(TaskVarbits.DELIVERED[0], task.quantity);
+        tickAt(101);
+        assertTrue(plugin.isGuidanceActive());
+        varbits.put(TaskVarbits.IDS[0], 0);
+        tickAt(160);
+        assertTrue(plugin.isGuidanceActive());
+        tickAt(161);
+        assertFalse(plugin.isGuidanceActive());
+    }
+
+    @Test
+    public void browsingANoticeboardActivatesGuidanceThroughDetailsAndUntilAMinuteAfterClosing()
+            throws ReflectiveOperationException {
+        dock();
+        tickAt(0);
+        assertFalse(plugin.isGuidanceActive());
+
+        boardOpen = true;
+        tickAt(10);
+        assertTrue(plugin.isGuidanceActive());
+        plugin.getNoticeboard().beginOpeningDetails(boardEntry);
+        boardOpen = false;
+        tickAt(70);
+        assertTrue(plugin.isGuidanceActive());
+        detailsOpen = true;
+        tickAt(130);
+        assertTrue(plugin.isGuidanceActive());
+
+        detailsOpen = false;
+        tickAt(131);
+        tickAt(190);
+        assertTrue(plugin.isGuidanceActive());
+        tickAt(191);
+        assertFalse(plugin.isGuidanceActive());
+
+        boardOpen = true;
+        tickAt(200);
+        boardOpen = false;
+        varbits.put(TaskVarbits.IDS[0], task.id);
+        tickAt(201);
+        tickAt(261);
+        assertTrue(plugin.isGuidanceActive());
+    }
+
+    @Test
+    public void changingWorldClearsTheGuidanceGracePeriod() throws ReflectiveOperationException {
+        aboard = true;
+        varbits.put(TaskVarbits.IDS[0], task.id);
+        tickAt(0);
+        varbits.put(TaskVarbits.IDS[0], 0);
+        tickAt(1);
+        assertTrue(plugin.isGuidanceActive());
+
+        GameStateChanged event = new GameStateChanged();
+        event.setGameState(GameState.HOPPING);
+        plugin.onGameStateChanged(event);
+        assertFalse(plugin.isGuidanceActive());
+        tickAt(2);
+        assertFalse(plugin.isGuidanceActive());
+    }
+
+    private void tickAt(long seconds) throws ReflectiveOperationException {
+        field(plugin, "clock").set(plugin, Clock.fixed(Instant.EPOCH.plusSeconds(seconds), ZoneOffset.UTC));
+        plugin.onGameTick(new GameTick());
+    }
+
+    private void dock() {
+        location = B.navigationLocation;
+        plugin.getPorts().add(ApiStub.of(GameObject.class, (method, arguments) -> {
+            switch (method) {
+                case "getId":
+                    return B.noticeboardObject;
+                case "getWorldView":
+                    return world;
+                case "getLocalLocation":
+                    return new LocalPoint(64, 64, WorldView.TOPLEVEL);
+                default:
+                    throw new AssertionError(method);
+            }
+        }));
     }
 
     private void publishPlan() throws InterruptedException {

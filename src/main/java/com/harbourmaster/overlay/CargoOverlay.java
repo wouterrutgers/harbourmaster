@@ -43,6 +43,9 @@ public final class CargoOverlay extends WidgetItemOverlay {
 
     @Override
     public void renderItemOverlay(Graphics2D graphics, int itemId, WidgetItem item) {
+        if (!plugin.isGuidanceActive()) {
+            return;
+        }
         HarbourmasterSnapshot state = plugin.getSnapshot();
         CargoTracker.Destination destination = state.cargo.get(itemId);
         if (destination == null) {

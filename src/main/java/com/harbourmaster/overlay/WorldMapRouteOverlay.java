@@ -39,6 +39,9 @@ public final class WorldMapRouteOverlay extends Overlay {
 
     @Override
     public Dimension render(Graphics2D graphics) {
+        if (!plugin.isGuidanceActive()) {
+            return null;
+        }
         Widget map = client.getWidget(InterfaceID.Worldmap.MAP_CONTAINER);
         if (!config.showWorldMap()
                 || map == null

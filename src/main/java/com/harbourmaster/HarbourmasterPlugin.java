@@ -24,10 +24,12 @@ import com.harbourmaster.overlay.RouteStatusOverlay;
 import com.harbourmaster.overlay.WorldMapRouteOverlay;
 import com.harbourmaster.tracker.ActiveTaskTracker;
 import com.harbourmaster.tracker.CargoTracker;
+import com.harbourmaster.tracker.GuidanceActivityTracker;
 import com.harbourmaster.tracker.NoticeboardTracker;
 import com.harbourmaster.tracker.OfferCycleTracker;
 import com.harbourmaster.tracker.PortTracker;
 import com.harbourmaster.tracker.RouteTracker;
+import java.time.Clock;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
@@ -108,6 +110,9 @@ public class HarbourmasterPlugin extends Plugin {
     private final NoticeboardTracker noticeboard = new NoticeboardTracker();
     private final PortTracker ports = new PortTracker();
     private final CargoTracker cargo = new CargoTracker();
+    private final GuidanceActivityTracker guidanceActivity = new GuidanceActivityTracker();
+    private Clock clock = Clock.systemUTC();
+    private volatile boolean guidanceActive;
     private PortGraph portGraph;
     private RouteTracker routeTracker;
     private CourierCyclePlanner cyclePlanner;
@@ -222,6 +227,8 @@ public class HarbourmasterPlugin extends Plugin {
     }
 
     private void clear() {
+        guidanceActivity.clear();
+        guidanceActive = false;
         ports.clear();
         noticeboard.clear();
         offerCycles.clear();
@@ -263,6 +270,13 @@ public class HarbourmasterPlugin extends Plugin {
         }
         List<ActiveTask> held = activeTasks.read(
                 client::getVarbitValue, client::getVarpValue, catalog::byId, catalog::isIgnoredTask, ports.getStart());
+        guidanceActive = guidanceActivity.update(
+                        held.stream().anyMatch(task -> !task.isFinished()),
+                        noticeboard.isOpen() || noticeboard.isDetailsOpen() || noticeboard.isOpeningDetails(),
+                        clock.instant())
+                && (ports.getDock() != null
+                        || client.getLocalPlayer() != null
+                                && !client.getLocalPlayer().getWorldView().isTopLevel());
         int completedTasks = client.getVarbitValue(VarbitID.PORT_TASKS_COMPLETED_TODAY);
         offerCycles.observe(completedTasks, noticeboard.isOpen() ? noticeboard.getOffers() : List.of());
         if (noticeboard.isDetailsOpen() || noticeboard.isOpeningDetails()) {
@@ -519,6 +533,10 @@ public class HarbourmasterPlugin extends Plugin {
 
     public HarbourmasterSnapshot getSnapshot() {
         return snapshot;
+    }
+
+    public boolean isGuidanceActive() {
+        return running && guidanceActive;
     }
 
     public boolean isCalculatingPlan() {
