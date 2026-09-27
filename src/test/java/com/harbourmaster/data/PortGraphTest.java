@@ -131,6 +131,27 @@ public class PortGraphTest {
     }
 
     @Test
+    public void movingAlongABentRouteCountsTheSegmentAfterTheNextWaypoint() {
+        WorldPoint end = Port.ALDARIN.navigationLocation;
+        WorldPoint corner = new WorldPoint(end.getX(), end.getY() - 160, 0);
+        WorldPoint start = new WorldPoint(corner.getX() - 170, corner.getY(), 0);
+        PortGraph graph = new PortGraph((from, to, boatSize) -> {
+                    assertEquals(start, from);
+                    return Optional.of(new RouteLeg(null, null, 330, List.of(from, corner, to)));
+                })
+                .detachedSnapshot(start);
+        assertEquals(330, graph.routeFromPosition(start, Port.ALDARIN).orElseThrow().distance, 0);
+
+        for (int moved = 3; moved <= 4; moved++) {
+            WorldPoint position = new WorldPoint(start.getX() + moved, start.getY(), 0);
+            RouteLeg remaining = graph.routeFromPosition(position, Port.ALDARIN).orElseThrow();
+
+            assertEquals(List.of(position, corner, end), remaining.points);
+            assertEquals(330 - moved, remaining.distance, 0);
+        }
+    }
+
+    @Test
     public void sailingAlongACachedPortRouteDoesNotStartAnotherSearch() {
         int[] searches = {0};
         WorldPoint destination = Port.MUSA_POINT.navigationLocation;

@@ -199,7 +199,7 @@ public final class PortGraph {
             }
             remaining.addAll(points.subList(index + 1, points.size()));
             double distance = distance(position, to);
-            for (int next = index + 2; next < points.size(); next++) {
+            for (int next = index + 1; next < points.size(); next++) {
                 distance += distance(points.get(next - 1), points.get(next));
             }
             return Optional.of(new RouteLeg(null, route.to, distance, remaining));
