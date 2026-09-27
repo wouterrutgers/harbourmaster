@@ -391,7 +391,7 @@ public class HarbourmasterPluginTest {
         publishPlan();
         assertEquals(30, plugin.getSnapshot().currentLeg.distance, 0);
 
-        WorldPoint firstPosition = new WorldPoint(destination.getX() - 20, destination.getY() + 2, 0);
+        WorldPoint firstPosition = new WorldPoint(destination.getX() - 20, destination.getY() + 15, 0);
         location = firstPosition;
         plugin.onGameTick(new GameTick());
         assertTrue(plugin.isCalculatingPlan());

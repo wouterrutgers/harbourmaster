@@ -131,6 +131,53 @@ public class PortGraphTest {
     }
 
     @Test
+    public void smallSteeringDeviationsKeepTheCurrentRouteUntilTheBoatLeavesIt() {
+        int[] searches = {0};
+        WorldPoint end = Port.MUSA_POINT.navigationLocation;
+        WorldPoint corner = new WorldPoint(end.getX(), end.getY() - 40, 0);
+        WorldPoint start = new WorldPoint(corner.getX() - 60, corner.getY(), 0);
+        PortGraph graph = new PortGraph((from, to, boatSize) -> {
+            searches[0]++;
+            WorldPoint turn = new WorldPoint(to.getX(), from.getY(), 0);
+            return Optional.of(
+                    new RouteLeg(null, null, from.distanceTo(turn) + turn.distanceTo(to), List.of(from, turn, to)));
+        });
+        PortGraph initial = graph.detachedSnapshot(start);
+        initial.routeFromPosition(start, Port.MUSA_POINT);
+        graph.mergeComputedRoutes(initial);
+        graph.routeFromPosition(start, Port.MUSA_POINT).orElseThrow();
+
+        int[] offsets = {1, -1, 2, -2, 1, 0};
+        for (int tick = 0; tick < offsets.length; tick++) {
+            int progress = (tick + 1) * 4;
+            WorldPoint boat = new WorldPoint(start.getX() + progress, start.getY() + offsets[tick], 0);
+            RouteLeg remaining = graph.routeFromPosition(boat, Port.MUSA_POINT).orElseThrow();
+
+            assertEquals(List.of(new WorldPoint(boat.getX(), start.getY(), 0), corner, end), remaining.points);
+            assertEquals(100 - progress, remaining.distance, 0);
+            assertFalse(graph.hasMissingRoutes());
+        }
+        assertEquals(1, searches[0]);
+
+        WorldPoint away = new WorldPoint(start.getX() + 28, start.getY() + 10, 0);
+        assertFalse(graph.routeFromPosition(away, Port.MUSA_POINT).isPresent());
+        assertTrue(graph.hasMissingRoutes());
+        PortGraph rerouted = graph.detachedSnapshot(away);
+        RouteLeg newRoute = rerouted.routeFromPosition(away, Port.MUSA_POINT).orElseThrow();
+        WorldPoint movedWhilePlanning = new WorldPoint(away.getX() + 4, away.getY() + 1, 0);
+        assertFalse(graph.routeFromPosition(movedWhilePlanning, Port.MUSA_POINT).isPresent());
+        graph.mergeComputedRoutes(rerouted);
+
+        RouteLeg remaining =
+                graph.routeFromPosition(movedWhilePlanning, Port.MUSA_POINT).orElseThrow();
+        assertEquals(2, searches[0]);
+        assertEquals(
+                List.of(new WorldPoint(movedWhilePlanning.getX(), away.getY(), 0), newRoute.points.get(1), end),
+                remaining.points);
+        assertFalse(graph.hasMissingRoutes());
+    }
+
+    @Test
     public void movingAlongABentRouteCountsTheSegmentAfterTheNextWaypoint() {
         WorldPoint end = Port.ALDARIN.navigationLocation;
         WorldPoint corner = new WorldPoint(end.getX(), end.getY() - 160, 0);

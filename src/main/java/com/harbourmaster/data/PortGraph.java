@@ -9,10 +9,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.stream.Stream;
 import net.runelite.api.coords.WorldPoint;
 
 public final class PortGraph {
+    private static final int ROUTE_FOLLOW_DISTANCE = 4;
     private final SailingRouter router;
     private final boolean background;
     private final Map<Integer, Optional<RouteLeg>> routes = new HashMap<>();
@@ -72,7 +72,7 @@ public final class PortGraph {
                     boatRoutes.remove(port);
                     continue;
                 }
-                Optional<RouteLeg> remaining = remainingRoute(current.get(), position);
+                Optional<RouteLeg> remaining = nearbyRemainingRoute(current.get(), position);
                 if (remaining.isPresent()) {
                     boatRoutes.put(port, remaining);
                     preparedBoatRoutes.put(new PositionRouteKey(position, port), remaining);
@@ -157,14 +157,25 @@ public final class PortGraph {
     }
 
     private Optional<RouteLeg> reusableBoatRoute(WorldPoint position, Port destination) {
-        return Stream.concat(preparedBoatRoutes.values().stream(), routes.values().stream())
+        Optional<RouteLeg> prepared = preparedBoatRoutes.values().stream()
+                .filter(Optional::isPresent)
+                .map(Optional::get)
+                .filter(route -> route.to == destination)
+                .map(route -> nearbyRemainingRoute(route, position))
+                .filter(Optional::isPresent)
+                .map(Optional::get)
+                .min(java.util.Comparator.comparingDouble(route -> route.distance));
+        if (prepared.isPresent()) {
+            return prepared;
+        }
+        return routes.values().stream()
                 .filter(Optional::isPresent)
                 .map(Optional::get)
                 .filter(route -> route.to == destination)
                 .map(route -> remainingRoute(route, position))
                 .filter(Optional::isPresent)
                 .map(Optional::get)
-                .findFirst();
+                .min(java.util.Comparator.comparingDouble(route -> route.distance));
     }
 
     private void cacheRoute(Port from, Port to, Optional<RouteLeg> route) {
@@ -205,6 +216,37 @@ public final class PortGraph {
             return Optional.of(new RouteLeg(null, route.to, distance, remaining));
         }
         return Optional.empty();
+    }
+
+    private static Optional<RouteLeg> nearbyRemainingRoute(RouteLeg route, WorldPoint position) {
+        Optional<RouteLeg> exact = remainingRoute(route, position);
+        if (exact.isPresent()) {
+            return exact;
+        }
+        WorldPoint closest = null;
+        double closestDistance = ROUTE_FOLLOW_DISTANCE;
+        for (int index = 1; index < route.points.size(); index++) {
+            WorldPoint from = route.points.get(index - 1);
+            WorldPoint to = route.points.get(index);
+            int horizontal = to.getX() - from.getX();
+            int vertical = to.getY() - from.getY();
+            int steps = Math.max(Math.abs(horizontal), Math.abs(vertical));
+            double fraction =
+                    ((position.getX() - from.getX()) * horizontal + (position.getY() - from.getY()) * vertical)
+                            / (double) (horizontal * horizontal + vertical * vertical);
+            int step = (int) Math.round(Math.max(0, Math.min(1, fraction)) * steps);
+            WorldPoint projected = new WorldPoint(
+                    from.getX() + horizontal * step / steps,
+                    from.getY() + vertical * step / steps,
+                    position.getPlane());
+            double deviation = distance(position, projected);
+            if (deviation <= closestDistance && onSegment(projected, from, to)) {
+                closest = projected;
+                closestDistance = deviation;
+            }
+        }
+        // Trim the checked route itself instead of drawing an unchecked shortcut from the boat.
+        return closest == null ? Optional.empty() : remainingRoute(route, closest);
     }
 
     private static boolean onSegment(WorldPoint point, WorldPoint from, WorldPoint to) {
