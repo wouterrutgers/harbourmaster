@@ -539,6 +539,25 @@ public class HarbourmasterPlugin extends Plugin {
         return running && guidanceActive;
     }
 
+    public boolean shouldCheckNoticeboard() {
+        HarbourmasterSnapshot state = snapshot;
+        return isGuidanceActive()
+                && !shouldUnloadCargo()
+                && !state.boardOpen
+                && state.freeSlots > 0
+                && state.dock.port != null
+                && state.dock.port.noticeboardObject >= 0
+                && !hasReadNoticeboard(state.dock.port);
+    }
+
+    public boolean shouldUnloadCargo() {
+        return isGuidanceActive() && cargo.needsUnload(client, snapshot.cargo);
+    }
+
+    public boolean hasReadNoticeboard(Port port) {
+        return offerCycles.hasObservedOffers(port);
+    }
+
     public boolean isCalculatingPlan() {
         return optimizerInitializing || pendingPlanRequest != null;
     }

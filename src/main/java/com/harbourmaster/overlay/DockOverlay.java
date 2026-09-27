@@ -16,17 +16,13 @@ import java.util.ArrayList;
 import java.util.List;
 import javax.inject.Inject;
 import net.runelite.api.Client;
-import net.runelite.api.EquipmentInventorySlot;
 import net.runelite.api.GameObject;
 import net.runelite.api.GroundObject;
-import net.runelite.api.Item;
-import net.runelite.api.ItemContainer;
 import net.runelite.api.Point;
 import net.runelite.api.Tile;
 import net.runelite.api.TileObject;
 import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
-import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.gameval.ObjectID;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
@@ -37,6 +33,7 @@ public final class DockOverlay extends Overlay {
     private final Client client;
     private final HarbourmasterPlugin plugin;
     private final HarbourmasterConfig config;
+    private final CargoTracker cargo = new CargoTracker();
 
     @Inject
     public DockOverlay(Client client, HarbourmasterPlugin plugin, HarbourmasterConfig config) {
@@ -53,20 +50,24 @@ public final class DockOverlay extends Overlay {
             return null;
         }
         HarbourmasterSnapshot state = plugin.getSnapshot();
+        boolean checkNoticeboard = plugin.shouldCheckNoticeboard();
+        boolean unloadCargo = plugin.shouldUnloadCargo();
         WorldView playerWorld = client.getLocalPlayer().getWorldView();
-        boolean fetchCargo =
-                state.dock.hasUnload() && playerWorld.isTopLevel() && !state.depositCargo && !carryingDelivery(state);
+        boolean fetchCargo = state.dock.hasUnload()
+                && playerWorld.isTopLevel()
+                && !state.depositCargo
+                && !cargo.carryingDelivery(client, state.cargo);
         for (GameObject object : plugin.getPorts().getObjects()) {
             Port port = Port.fromObject(object.getId());
             if (config.highlightGangplank() && state.dock.port != null) {
                 boolean gangplank = object.getId() == ObjectID.SAILING_GANGPLANK_PROXY
                         || port == state.dock.port && object.getId() == port.gangplankObject;
-                boolean boarding = (state.depositCargo || fetchCargo || state.currentLeg != null)
+                boolean boarding = (state.depositCargo || fetchCargo || state.currentLeg != null && !checkNoticeboard)
                         && playerWorld.isTopLevel()
                         && gangplank
                         && object.getWorldView().isTopLevel();
                 boolean leavingBoat = !state.depositCargo
-                        && !state.dock.actions.isEmpty()
+                        && (unloadCargo || !state.dock.actions.isEmpty() || checkNoticeboard)
                         && !playerWorld.isTopLevel()
                         && gangplank
                         && (object.getWorldView().isTopLevel() || object.getWorldView() == playerWorld);
@@ -85,14 +86,11 @@ public final class DockOverlay extends Overlay {
             }
             if (port != null && object.getId() == port.noticeboardObject && config.highlightNoticeboards()) {
                 if (state.freeSlots > 0 || config.subdueFullBoards()) {
-                    draw(
-                            graphics,
-                            object,
-                            state.freeSlots > 0 ? config.bestOfferColor() : Color.GRAY,
-                            List.of(state.freeSlots + " task slots free"));
+                    drawNoticeboard(graphics, object, port, state, unloadCargo);
                 }
             }
             if (!state.dock.actions.isEmpty()
+                    && !unloadCargo
                     && !state.dock.hasAcceptance()
                     && port == state.dock.port
                     && object.getId() == port.ledgerObject
@@ -105,20 +103,21 @@ public final class DockOverlay extends Overlay {
                 draw(graphics, object, state.dock.hasUnload() ? config.unloadColor() : config.loadColor(), lines);
             }
             if (config.highlightCargoHold()
-                    && (state.depositCargo || !state.dock.actions.isEmpty() && !state.dock.hasAcceptance())
+                    && (state.depositCargo
+                            || unloadCargo
+                            || !state.dock.actions.isEmpty() && !state.dock.hasAcceptance() && !state.dock.hasUnload())
                     && CargoHoldObjects.IDS.contains(object.getId())
                     && !object.getWorldView().isTopLevel()
                     && object.getWorldView() == playerWorld) {
                 boolean load = state.dock.actions.stream().anyMatch(event -> event.action == RouteEvent.Action.PICKUP);
-                boolean unload = !state.depositCargo && state.dock.hasUnload();
                 draw(
                         graphics,
                         object,
-                        unload ? config.unloadColor() : config.loadColor(),
+                        unloadCargo ? config.unloadColor() : config.loadColor(),
                         List.of(
                                 state.depositCargo
                                         ? "Deposit task cargo"
-                                        : unload
+                                        : unloadCargo
                                                 ? (load ? "Unload, then load cargo" : "Unload task cargo")
                                                 : "Load task cargo"));
             }
@@ -126,11 +125,29 @@ public final class DockOverlay extends Overlay {
         return null;
     }
 
-    private boolean carryingDelivery(HarbourmasterSnapshot state) {
-        ItemContainer equipment = client.getItemContainer(InventoryID.WORN);
-        Item weapon = equipment == null ? null : equipment.getItem(EquipmentInventorySlot.WEAPON.getSlotIdx());
-        CargoTracker.Destination destination = weapon == null ? null : state.cargo.get(weapon.getId());
-        return destination != null && destination.unload;
+    private void drawNoticeboard(
+            Graphics2D graphics, GameObject object, Port port, HarbourmasterSnapshot state, boolean unloadCargo) {
+        String label = state.freeSlots + (state.freeSlots == 1 ? " task slot free" : " task slots free");
+        Color color = state.freeSlots > 0 ? config.bestOfferColor() : Color.GRAY;
+        if (state.freeSlots > 0 && unloadCargo && port == state.dock.port) {
+            label = "Unload cargo first";
+            color = Color.GRAY;
+        } else if (state.freeSlots > 0 && config.enableOptimizer() && config.rankOffers()) {
+            if (!plugin.hasReadNoticeboard(port)) {
+                label = "Check the noticeboard";
+            } else if (plugin.isCalculatingPlan()) {
+                label = "Checking offers";
+            } else if (state.courierPlan != null && state.courierPlan.available) {
+                long recommended = state.route.nextActions().stream()
+                        .filter(event -> event.port == port && event.action == RouteEvent.Action.ACCEPT)
+                        .count();
+                label = recommended > 0
+                        ? "Accept " + recommended + (recommended == 1 ? " task" : " tasks")
+                        : "No recommended tasks";
+                color = recommended > 0 ? config.bestOfferColor() : Color.GRAY;
+            }
+        }
+        draw(graphics, object, color, List.of(label));
     }
 
     private static void draw(Graphics2D graphics, GameObject object, Color color, List<String> lines) {

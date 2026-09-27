@@ -29,9 +29,12 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import net.runelite.api.Client;
+import net.runelite.api.EquipmentInventorySlot;
 import net.runelite.api.GameObject;
 import net.runelite.api.GameState;
 import net.runelite.api.IndexedObjectSet;
+import net.runelite.api.Item;
+import net.runelite.api.ItemContainer;
 import net.runelite.api.Player;
 import net.runelite.api.WorldEntity;
 import net.runelite.api.WorldView;
@@ -40,6 +43,7 @@ import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.gameval.InterfaceID;
+import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
@@ -58,6 +62,7 @@ public class HarbourmasterPluginTest {
     private boolean aboard;
     private boolean boardOpen;
     private boolean detailsOpen;
+    private Item carried;
     private WorldPoint stalledPosition;
     private final CountDownLatch searchStarted = new CountDownLatch(1);
     private final CountDownLatch searchCancelled = new CountDownLatch(1);
@@ -142,6 +147,13 @@ public class HarbourmasterPluginTest {
                 throw new AssertionError(method);
         }
     });
+    private final ItemContainer equipment = ApiStub.of(ItemContainer.class, (method, arguments) -> {
+        if (method.equals("getItem")) {
+            assertEquals(EquipmentInventorySlot.WEAPON.getSlotIdx(), arguments[0]);
+            return carried;
+        }
+        throw new AssertionError(method);
+    });
     private final Client client = ApiStub.of(Client.class, (method, arguments) -> {
         switch (method) {
             case "getGameState":
@@ -152,7 +164,8 @@ public class HarbourmasterPluginTest {
                 }
                 return arguments[0].equals(InterfaceID.PortTaskInfo.WINDOW) ? details : null;
             case "getItemContainer":
-                return null;
+                assertEquals(InventoryID.WORN, arguments[0]);
+                return equipment;
             case "getVarbitValue":
                 return varbits.getOrDefault(arguments[0], 0);
             case "getVarpValue":
@@ -331,6 +344,42 @@ public class HarbourmasterPluginTest {
     }
 
     @Test
+    public void boatCargoIsUnloadedBeforeCheckingOrAcceptingOffers()
+            throws ReflectiveOperationException, InterruptedException {
+        CourierTask delivery = courier(2, A, B, 1);
+        PortTaskCatalog catalog = (PortTaskCatalog) field(plugin, "catalog").get(plugin);
+        field(catalog, "byId").set(catalog, Map.of(task.id, task, delivery.id, delivery));
+        dock();
+        aboard = true;
+        varbits.put(TaskVarbits.IDS[0], delivery.id);
+        varbits.put(TaskVarbits.TAKEN[0], delivery.quantity);
+        varbits.put(VarbitID.PORT_TASK_EXTRA_SLOTS_UNLOCKED, 1);
+        varbits.put(VarbitID.PORT_TASKS_COMPLETED_TODAY, 7);
+        plugin.onGameTick(new GameTick());
+        publishPlan();
+
+        assertTrue(plugin.shouldUnloadCargo());
+        assertFalse(plugin.shouldCheckNoticeboard());
+
+        ((OfferCycleTracker) field(plugin, "offerCycles").get(plugin)).observe(7, List.of(task));
+        plugin.onGameTick(new GameTick());
+        publishPlan();
+        assertTrue(plugin.getSnapshot().dock.hasAcceptance());
+        assertFalse(plugin.getSnapshot().dock.hasUnload());
+        assertTrue(plugin.shouldUnloadCargo());
+
+        carried = new Item(delivery.itemId, 1);
+        plugin.onGameTick(new GameTick());
+        assertFalse(plugin.shouldUnloadCargo());
+
+        carried = null;
+        aboard = false;
+        plugin.onGameTick(new GameTick());
+        assertFalse(plugin.shouldUnloadCargo());
+        assertTrue(plugin.getSnapshot().dock.hasAcceptance());
+    }
+
+    @Test
     public void sailingUpdatesTheDisplayedRouteWhileTheBoatKeepsMoving() throws InterruptedException {
         plugin.getPorts().update(client, A);
         aboard = true;
@@ -386,6 +435,41 @@ public class HarbourmasterPluginTest {
         assertFalse(plugin.isCalculatingPlan());
         assertEquals(B, plugin.getSnapshot().route.stops.get(0).port);
         assertTrue(callbacks.isEmpty());
+    }
+
+    @Test
+    public void unreadDockOffersPromptABoardCheckBeforeContinuingTheRoute()
+            throws ReflectiveOperationException, InterruptedException {
+        CourierTask delivery = courier(2, A, D, 100);
+        PortTaskCatalog catalog = (PortTaskCatalog) field(plugin, "catalog").get(plugin);
+        field(catalog, "byId").set(catalog, Map.of(task.id, task, delivery.id, delivery));
+        varbits.put(TaskVarbits.IDS[0], delivery.id);
+        varbits.put(TaskVarbits.TAKEN[0], delivery.quantity);
+        varbits.put(VarbitID.PORT_TASK_EXTRA_SLOTS_UNLOCKED, 1);
+        dock();
+        aboard = true;
+        plugin.onGameTick(new GameTick());
+        publishPlan();
+
+        assertEquals(D, plugin.getSnapshot().nextPort());
+        assertTrue(plugin.shouldCheckNoticeboard());
+
+        boardOpen = true;
+        plugin.onGameTick(new GameTick());
+        publishPlan();
+        boardOpen = false;
+        plugin.onGameTick(new GameTick());
+        assertFalse(plugin.shouldCheckNoticeboard());
+        assertTrue(plugin.getSnapshot().dock.hasAcceptance());
+
+        varbits.put(VarbitID.PORT_TASKS_COMPLETED_TODAY, 8);
+        plugin.onGameTick(new GameTick());
+        publishPlan();
+        assertTrue(plugin.shouldCheckNoticeboard());
+
+        varbits.put(VarbitID.PORT_TASK_EXTRA_SLOTS_UNLOCKED, 0);
+        plugin.onGameTick(new GameTick());
+        assertFalse(plugin.shouldCheckNoticeboard());
     }
 
     @Test

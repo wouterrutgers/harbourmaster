@@ -52,7 +52,8 @@ public final class CargoOverlay extends WidgetItemOverlay {
             return;
         }
         Rectangle bounds = item.getCanvasBounds();
-        boolean unload = state.dock.unloads(itemId) && config.highlightUnloadCrates();
+        boolean unload = (state.dock.unloads(itemId) || destination.unload && plugin.shouldUnloadCargo())
+                && config.highlightUnloadCrates();
         if (unload) {
             graphics.drawImage(
                     items.getItemOutline(itemId, item.getQuantity(), config.unloadColor()), bounds.x, bounds.y, null);

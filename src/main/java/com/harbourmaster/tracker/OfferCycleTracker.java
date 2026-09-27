@@ -41,6 +41,10 @@ public final class OfferCycleTracker {
         return Map.copyOf(offersByPort);
     }
 
+    public boolean hasObservedOffers(Port port) {
+        return offersByPort.containsKey(port);
+    }
+
     public int tasksUntilReset() {
         return TASKS_PER_OFFER_CYCLE - previousCompletedTasks % TASKS_PER_OFFER_CYCLE;
     }

@@ -40,6 +40,7 @@ public class DockOverlayTest {
     private Port dock = A;
     private RoutePlan route = RoutePlan.empty();
     private boolean guidanceActive = true;
+    private boolean checkNoticeboard;
     private final WorldView boat = boat();
     private WorldView playerWorld = boat;
     private final Player player = ApiStub.of(Player.class, (method, arguments) -> {
@@ -67,6 +68,16 @@ public class DockOverlayTest {
         }
     });
     private final HarbourmasterPlugin plugin = new HarbourmasterPlugin() {
+        @Override
+        public boolean shouldCheckNoticeboard() {
+            return checkNoticeboard;
+        }
+
+        @Override
+        public boolean shouldUnloadCargo() {
+            return guidanceActive && cargo.needsUnload(client, cargo.destinations(tasks, dock));
+        }
+
         @Override
         public boolean isGuidanceActive() {
             return guidanceActive;
@@ -136,6 +147,10 @@ public class DockOverlayTest {
         plugin.getPorts().add(object(shore, A.gangplankObject, 70));
         assertNotEquals(0, render().getRGB(20, 20));
         assertEquals(0, render().getRGB(80, 20));
+
+        carried = new Item(tasks.get(0).definition.itemId, 1);
+        assertNotEquals(0, render().getRGB(20, 20));
+        assertEquals(0, render().getRGB(80, 20));
     }
 
     @Test
@@ -170,6 +185,20 @@ public class DockOverlayTest {
         plugin.getPorts().add(object(playerWorld, A.noticeboardObject, 10));
         route = new RouteOptimizer(line()).optimize(A, tasks);
 
+        assertNotEquals(0, render().getRGB(20, 20));
+    }
+
+    @Test
+    public void unreadNoticeboardHighlightsLeavingTheBoatBeforeSailingOn() {
+        WorldView shore = world(true);
+        plugin.getPorts().add(object(shore, A.gangplankObject, 10));
+        route = new RouteOptimizer(line()).optimize(A, tasks);
+        checkNoticeboard = true;
+        assertNotEquals(0, render().getRGB(20, 20));
+
+        playerWorld = shore;
+        assertEquals(0, render().getRGB(20, 20));
+        checkNoticeboard = false;
         assertNotEquals(0, render().getRGB(20, 20));
     }
 

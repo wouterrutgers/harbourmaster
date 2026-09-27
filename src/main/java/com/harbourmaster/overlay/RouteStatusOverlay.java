@@ -33,7 +33,15 @@ public final class RouteStatusOverlay extends OverlayPanel {
             return null;
         }
         panelComponent.getChildren().clear();
-        if (!state.dock.actions.isEmpty()
+        if (plugin.shouldUnloadCargo() && config.showDockChecklist()) {
+            title(state.dock.port.name + " dock", config.activeRouteColor());
+            line("Unload task cargo", config.unloadColor());
+            line("Take delivery crates before going ashore", Color.WHITE);
+        } else if (plugin.shouldCheckNoticeboard() && config.showDockChecklist()) {
+            title(state.dock.port.name + " dock", config.activeRouteColor());
+            line("Check the noticeboard", config.loadColor());
+            line("Read the offers before sailing", Color.WHITE);
+        } else if (!state.dock.actions.isEmpty()
                 && (state.nextPort() == null || state.dock.port == state.nextPort())
                 && config.showDockChecklist()) {
             title(state.dock.port.name + " dock", config.activeRouteColor());

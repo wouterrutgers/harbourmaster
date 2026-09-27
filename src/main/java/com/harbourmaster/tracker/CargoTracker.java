@@ -14,10 +14,26 @@ import net.runelite.api.gameval.InventoryID;
 
 public final class CargoTracker {
     public boolean needsDeposit(Client client, Map<Integer, Destination> destinations, Port dock) {
+        Destination destination = carriedDestination(client, destinations);
+        return destination != null && destination.port != dock;
+    }
+
+    public boolean needsUnload(Client client, Map<Integer, Destination> destinations) {
+        return client.getLocalPlayer() != null
+                && !client.getLocalPlayer().getWorldView().isTopLevel()
+                && destinations.values().stream().anyMatch(destination -> destination.unload)
+                && carriedDestination(client, destinations) == null;
+    }
+
+    public boolean carryingDelivery(Client client, Map<Integer, Destination> destinations) {
+        Destination destination = carriedDestination(client, destinations);
+        return destination != null && destination.unload;
+    }
+
+    private Destination carriedDestination(Client client, Map<Integer, Destination> destinations) {
         ItemContainer equipment = client.getItemContainer(InventoryID.WORN);
         Item carried = equipment == null ? null : equipment.getItem(EquipmentInventorySlot.WEAPON.getSlotIdx());
-        Destination destination = carried == null ? null : destinations.get(carried.getId());
-        return destination != null && destination.port != dock;
+        return carried == null ? null : destinations.get(carried.getId());
     }
 
     public Map<Integer, Destination> destinations(List<ActiveTask> tasks, Port dock) {
