@@ -276,7 +276,7 @@ public class HarbourmasterPlugin extends Plugin {
         ports.update(client, noticeboard.isOpen() ? noticeboard.getPort() : null);
         List<ActiveTask> held = activeTasks.read(
                 client::getVarbitValue, client::getVarpValue, catalog::byId, catalog::isIgnoredTask, ports.getStart());
-        TravelContext availableTravel = config.useTeleports() ? travelTracker.read(client, held) : null;
+        TravelContext availableTravel = config.useTeleports() ? travelTracker.read(client, held, config) : null;
         if (!java.util.Objects.equals(travelContext, availableTravel)) {
             clearPlan();
             travelContext = availableTravel;
@@ -377,6 +377,13 @@ public class HarbourmasterPlugin extends Plugin {
             requestPlan(held, observedOffers, level, freeSlots, tasksUntilReset, null);
         }
         if (previousCourierPlan == null || pendingPlanRequest != null) {
+            return previousCourierPlan;
+        }
+
+        if (!previousCourierPlan.available) {
+            if (!java.util.Objects.equals(previousPlanRequest.boatPosition, ports.getBoatPosition())) {
+                requestPlan(held, observedOffers, level, freeSlots, tasksUntilReset, null);
+            }
             return previousCourierPlan;
         }
 

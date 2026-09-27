@@ -1,5 +1,6 @@
 package com.harbourmaster.tracker;
 
+import com.harbourmaster.HarbourmasterConfig;
 import com.harbourmaster.data.BoatSize;
 import com.harbourmaster.data.CharterRoutes;
 import com.harbourmaster.model.ActiveTask;
@@ -16,11 +17,9 @@ import java.util.stream.Collectors;
 import net.runelite.api.Client;
 import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
-import net.runelite.api.Skill;
 import net.runelite.api.coords.WorldPoint;
 import net.runelite.api.gameval.DBTableID;
 import net.runelite.api.gameval.InventoryID;
-import net.runelite.api.gameval.ItemID;
 import net.runelite.api.gameval.VarbitID;
 
 public final class TravelTracker {
@@ -37,13 +36,6 @@ public final class TravelTracker {
         VarbitID.SAILING_BOAT_3_PORT,
         VarbitID.SAILING_BOAT_4_PORT,
         VarbitID.SAILING_BOAT_5_PORT
-    };
-    private static final int[] FOCUS = {
-        VarbitID.SAILING_BOAT_1_TELEPORT_FOCUS,
-        VarbitID.SAILING_BOAT_2_TELEPORT_FOCUS,
-        VarbitID.SAILING_BOAT_3_TELEPORT_FOCUS,
-        VarbitID.SAILING_BOAT_4_TELEPORT_FOCUS,
-        VarbitID.SAILING_BOAT_5_TELEPORT_FOCUS
     };
     private static final int[] KEEL = {
         VarbitID.SAILING_BOAT_1_KEEL,
@@ -88,7 +80,7 @@ public final class TravelTracker {
                 && client.getVarbitValue(VarbitID.SAILING_BT_GWENITH_GLIDE_MASTER_STATE) != 2;
     }
 
-    public TravelContext read(Client client, List<ActiveTask> tasks) {
+    public TravelContext read(Client client, List<ActiveTask> tasks, HarbourmasterConfig config) {
         if (docks.isEmpty()) {
             for (Port port : Port.values()) {
                 docks.put(
@@ -103,69 +95,31 @@ public final class TravelTracker {
         boolean aboard = client.getLocalPlayer() != null
                 && !client.getLocalPlayer().getWorldView().isTopLevel();
         boolean atSea = aboard && client.getVarbitValue(VarbitID.SAILING_TRANSMIT_IS_AT_SEA) != 0;
-        TravelSupplies supplies = new TravelSupplies(client);
-        if (supplies.has(ItemID.SAILORS_AMULET)) {
-            supplies.items.put(ItemID.SAILORS_AMULET, client.getVarbitValue(VarbitID.CHARGES_SAILORS_AMULET_QUANTITY));
-        }
-        int crystalCharges = 0;
-        int[] crystals = {
-            ItemID.MOURNING_TELEPORT_CRYSTAL_1,
-            ItemID.MOURNING_TELEPORT_CRYSTAL_2,
-            ItemID.MOURNING_TELEPORT_CRYSTAL_3,
-            ItemID.MOURNING_TELEPORT_CRYSTAL_4,
-            ItemID.MOURNING_TELEPORT_CRYSTAL_5
-        };
-        for (int index = 0; index < crystals.length; index++) {
-            crystalCharges += supplies.items.getOrDefault(crystals[index], 0) * (index + 1);
-        }
-        supplies.items.put(ItemID.MOURNING_TELEPORT_CRYSTAL_1, crystalCharges);
         List<TravelMethod> methods = new ArrayList<>();
         List<TravelMethod> summons = new ArrayList<>();
-        if (client.getVarbitValue(VarbitID.SAILORS_AMULET_DEEPFIN) != 0) {
-            item(methods, supplies, Port.DEEPFIN_POINT, ItemID.SAILORS_AMULET, "Sailors' amulet", 1943, 2757);
+        if (config.sailorsAmuletPandemonium()) {
+            methods.add(teleport(Port.PANDEMONIUM, "Sailors' amulet to Pandemonium", 3058, 2975));
         }
-        if (client.getVarbitValue(VarbitID.SAILORS_AMULET_ROBERTS) != 0) {
-            item(methods, supplies, Port.PORT_ROBERTS, ItemID.SAILORS_AMULET, "Sailors' amulet", 1889, 3292);
+        if (config.sailorsAmuletDeepfinPoint()) {
+            methods.add(teleport(Port.DEEPFIN_POINT, "Sailors' amulet to Deepfin Point", 1943, 2757));
         }
-        item(methods, supplies, Port.PANDEMONIUM, ItemID.SAILORS_AMULET, "Sailors' amulet", 3058, 2975);
-        if (client.getVarbitValue(VarbitID.VARLAMORE_VISITED) != 0) {
-            house(client, methods, supplies, Port.ALDARIN, 9, ItemID.NZONE_TELETAB_ALDARIN, 1422, 2963);
+        if (config.sailorsAmuletPortRoberts()) {
+            methods.add(teleport(Port.PORT_ROBERTS, "Sailors' amulet to Port Roberts", 1889, 3292));
         }
-        if (client.getVarbitValue(VarbitID.SOTE) >= 200) {
-            house(client, methods, supplies, Port.PRIFDDINAS, 7, ItemID.NZONE_TELETAB_PRIFDDINAS, 3239, 6076);
-            item(
-                    methods,
-                    supplies,
-                    Port.PRIFDDINAS,
-                    ItemID.MOURNING_TELEPORT_CRYSTAL_1,
-                    "Teleport crystal",
-                    3264,
-                    6066);
-            if (supplies.has(ItemID.PRIF_TELEPORT_CRYSTAL)) {
-                methods.add(teleport(Port.PRIFDDINAS, "Eternal teleport crystal", 3264, 6066, Map.of()));
-            }
+        if (config.aldarinTeleport()) {
+            methods.add(teleport(Port.ALDARIN, "Teleport to Aldarin house portal", 1422, 2963));
         }
-        if (client.getVarbitValue(VarbitID.LUNAR_QUEST_MAIN) >= 190) {
-            item(
-                    methods,
-                    supplies,
-                    Port.LUNAR_ISLE,
-                    ItemID.LUNAR_TABLET_MOONCLAN_TELEPORT,
-                    "Moonclan tablet",
-                    2113,
-                    3915);
-            item(methods, supplies, Port.LUNAR_ISLE, ItemID.TELEPORTSCROLL_LUNARISLE, "Lunar isle scroll", 2095, 3913);
-            spell(
-                    client,
-                    methods,
-                    supplies,
-                    Port.LUNAR_ISLE,
-                    2,
-                    69,
-                    "Moonclan teleport",
-                    2113,
-                    3915,
-                    Map.of(ItemID.ASTRALRUNE, 2, ItemID.LAWRUNE, 1, ItemID.EARTHRUNE, 2));
+        if (config.prifddinasTeleport()) {
+            methods.add(teleport(Port.PRIFDDINAS, "Teleport to Prifddinas house portal", 3239, 6076));
+        }
+        if (config.teleportCrystal()) {
+            methods.add(teleport(Port.PRIFDDINAS, "Teleport crystal to Prifddinas", 3264, 6066));
+        }
+        if (config.moonclanTeleport()) {
+            methods.add(teleport(Port.LUNAR_ISLE, "Moonclan teleport", 2113, 3915));
+        }
+        if (config.lunarIsleScroll()) {
+            methods.add(teleport(Port.LUNAR_ISLE, "Lunar Isle scroll", 2095, 3913));
         }
         for (int boat = 1; boat <= 5; boat++) {
             if (client.getVarbitValue(OWNED[boat - 1]) == 0) {
@@ -176,19 +130,17 @@ public final class TravelTracker {
                 contents.put(boat, List.of(hold.getItems()));
             }
             Port port = docks.get(client.getVarbitValue(DOCK[boat - 1]));
-            int focus = client.getVarbitValue(FOCUS[boat - 1]);
-            if (focus == 2 && port != null && !(atSea && boat == lastBoat)) {
-                boatMethods(client, methods, supplies, boat, port, false);
+            if (config.teleportToBoat() && port != null && !(atSea && boat == lastBoat)) {
+                methods.add(new TravelMethod(
+                        null, port, boat, TravelStep.Kind.TELEPORT, "Teleport to boat " + boat, 5, null));
             }
-            if (boat == courierBoat && focus > 0 && port != null) {
-                boatMethods(client, summons, supplies, boat, port, true);
+            if (config.summonBoat() && boat == courierBoat && port != null) {
+                summons.add(new TravelMethod(null, port, boat, TravelStep.Kind.SUMMON, "Summon boat " + boat, 5, null));
             }
         }
-        CharterRoutes.add(
-                client,
-                methods,
-                supplies.items.getOrDefault(ItemID.COINS, 0),
-                supplies.equipped.contains(ItemID.RING_OF_CHAROS_UNLOCKED));
+        if (config.charterShips()) {
+            CharterRoutes.add(methods);
+        }
         Set<Integer> cargo = tasks.stream()
                 .filter(task -> task.definition != null)
                 .map(task -> task.definition.itemId)
@@ -215,15 +167,10 @@ public final class TravelTracker {
                                 && item.getQuantity() > 0
                                 && !cargo.contains(item.getId())
                                 && !safeHoldItem(client, item.getId()));
-        Map<Integer, Integer> relevant = new HashMap<>();
         for (TravelMethod method : methods) {
             if (method.arrival != null) {
                 arrivals.put(method.arrival, method.destination);
             }
-            method.cost.keySet().forEach(item -> relevant.put(item, supplies.items.getOrDefault(item, 0)));
-        }
-        for (TravelMethod method : summons) {
-            method.cost.keySet().forEach(item -> relevant.put(item, supplies.items.getOrDefault(item, 0)));
         }
         return new TravelContext(
                 courierBoat,
@@ -237,8 +184,7 @@ public final class TravelTracker {
                 carrying,
                 safe,
                 methods,
-                summons,
-                relevant);
+                summons);
     }
 
     private static boolean safeHoldItem(Client client, int item) {
@@ -275,85 +221,10 @@ public final class TravelTracker {
         return closest;
     }
 
-    private static void house(
-            Client client,
-            List<TravelMethod> methods,
-            TravelSupplies supplies,
-            Port port,
-            int house,
-            int tablet,
-            int x,
-            int y) {
-        item(methods, supplies, port, tablet, port.name + " tablet", x, y);
-        if (supplies.has(ItemID.SKILLCAPE_CONSTRUCTION, ItemID.SKILLCAPE_CONSTRUCTION_TRIMMED)) {
-            methods.add(teleport(port, "Construction cape", x, y, Map.of()));
-        }
-        if (client.getVarbitValue(VarbitID.POH_HOUSE_LOCATION) == house) {
-            item(methods, supplies, port, ItemID.POH_TABLET_TELEPORTTOHOUSE, "House tablet outside", x, y);
-            spell(
-                    client,
-                    methods,
-                    supplies,
-                    port,
-                    0,
-                    40,
-                    "Teleport to house outside",
-                    x,
-                    y,
-                    Map.of(ItemID.LAWRUNE, 1, ItemID.AIRRUNE, 1, ItemID.EARTHRUNE, 1));
-        }
-    }
-
-    private static void item(
-            List<TravelMethod> methods, TravelSupplies supplies, Port port, int item, String name, int x, int y) {
-        if (supplies.has(item)) {
-            methods.add(teleport(port, name, x, y, Map.of(item, 1)));
-        }
-    }
-
-    private static TravelMethod teleport(Port port, String name, int x, int y, Map<Integer, Integer> cost) {
+    private static TravelMethod teleport(Port port, String instruction, int x, int y) {
         WorldPoint arrival = new WorldPoint(x, y, 0);
         // Prifddinas city uses a separate map area; a straight coordinate distance to its dock is meaningless.
         double walk = port == Port.PRIFDDINAS ? 80 : arrival.distanceTo2D(port.navigationLocation) / 2.0 + 2;
-        return new TravelMethod(null, port, 0, TravelStep.Kind.TELEPORT, "Use " + name, 4, arrival, walk, cost);
-    }
-
-    private static void spell(
-            Client client,
-            List<TravelMethod> methods,
-            TravelSupplies supplies,
-            Port port,
-            int book,
-            int level,
-            String name,
-            int x,
-            int y,
-            Map<Integer, Integer> cost) {
-        if (client.getVarbitValue(VarbitID.SPELLBOOK) == book && client.getBoostedSkillLevel(Skill.MAGIC) >= level) {
-            for (Map<Integer, Integer> allocated : supplies.spellCosts(cost)) {
-                methods.add(teleport(port, name, x, y, allocated));
-            }
-        }
-    }
-
-    private static void boatMethods(
-            Client client, List<TravelMethod> methods, TravelSupplies supplies, int boat, Port port, boolean summon) {
-        if (client.getVarbitValue(VarbitID.SAILING_INTRO) < 50) {
-            return;
-        }
-        int tablet = summon ? ItemID.POH_TABLET_TELEPORTBOATTOME : ItemID.POH_TABLET_TELEPORTMETOBOAT;
-        TravelStep.Kind kind = summon ? TravelStep.Kind.SUMMON : TravelStep.Kind.TELEPORT;
-        String instruction = summon ? "Summon boat " + boat : "Teleport to boat " + boat;
-        if (supplies.has(tablet)) {
-            methods.add(new TravelMethod(
-                    null, port, boat, kind, instruction + " using a tablet", 5, null, Map.of(tablet, 1)));
-        }
-        if (client.getVarbitValue(VarbitID.SPELLBOOK) == 0
-                && client.getBoostedSkillLevel(Skill.MAGIC) >= (summon ? 56 : 67)) {
-            for (Map<Integer, Integer> cost : supplies.spellCosts(
-                    Map.of(ItemID.LAWRUNE, 2, ItemID.WATERRUNE, summon ? 1 : 2, ItemID.EARTHRUNE, summon ? 1 : 2))) {
-                methods.add(new TravelMethod(null, port, boat, kind, instruction, 5, null, cost));
-            }
-        }
+        return new TravelMethod(null, port, 0, TravelStep.Kind.TELEPORT, instruction, 4, arrival, walk);
     }
 }

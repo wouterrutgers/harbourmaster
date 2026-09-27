@@ -67,17 +67,6 @@ public interface HarbourmasterConfig extends Config {
     }
 
     @ConfigItem(
-            keyName = "useTeleports",
-            name = "Use teleports and charter ships",
-            description =
-                    "Use detected travel methods to visit boards and reposition an empty boat. Requires available supplies.",
-            section = route,
-            position = 8)
-    default boolean useTeleports() {
-        return false;
-    }
-
-    @ConfigItem(
             keyName = "showRouteOverlay",
             name = "Show route status",
             description = "Show the next destination and action while sailing.",
@@ -149,7 +138,134 @@ public interface HarbourmasterConfig extends Config {
         return new Color(120, 145, 165, 130);
     }
 
-    @ConfigSection(name = "Dock", description = "Dock settings", position = 2)
+    @ConfigSection(
+            name = "Teleports and charter ships",
+            description = "Enable the methods you can use. Required gear, supplies and unlocks are assumed available.",
+            position = 2)
+    String travel = "travel";
+
+    @ConfigItem(
+            keyName = "useTeleports",
+            name = "Use teleports and charter ships",
+            description = "Include the travel methods enabled below when planning courier routes.",
+            section = travel,
+            position = 0)
+    default boolean useTeleports() {
+        return false;
+    }
+
+    @ConfigItem(
+            keyName = "sailorsAmuletPandemonium",
+            name = "Sailors' amulet to Pandemonium",
+            description = "Assume you can use the Sailors' amulet teleport to Pandemonium whenever needed.",
+            section = travel,
+            position = 1)
+    default boolean sailorsAmuletPandemonium() {
+        return false;
+    }
+
+    @ConfigItem(
+            keyName = "sailorsAmuletDeepfinPoint",
+            name = "Sailors' amulet to Deepfin Point",
+            description = "Assume you can use the Sailors' amulet teleport to Deepfin Point whenever needed.",
+            section = travel,
+            position = 2)
+    default boolean sailorsAmuletDeepfinPoint() {
+        return false;
+    }
+
+    @ConfigItem(
+            keyName = "sailorsAmuletPortRoberts",
+            name = "Sailors' amulet to Port Roberts",
+            description = "Assume you can use the Sailors' amulet teleport to Port Roberts whenever needed.",
+            section = travel,
+            position = 3)
+    default boolean sailorsAmuletPortRoberts() {
+        return false;
+    }
+
+    @ConfigItem(
+            keyName = "aldarinTeleport",
+            name = "Aldarin house portal",
+            description = "Assume you can reach the Aldarin house portal using a spell, tablet or Construction cape.",
+            section = travel,
+            position = 4)
+    default boolean aldarinTeleport() {
+        return false;
+    }
+
+    @ConfigItem(
+            keyName = "prifddinasTeleport",
+            name = "Prifddinas house portal",
+            description =
+                    "Assume you can reach the Prifddinas house portal using a spell, tablet or Construction cape.",
+            section = travel,
+            position = 5)
+    default boolean prifddinasTeleport() {
+        return false;
+    }
+
+    @ConfigItem(
+            keyName = "teleportCrystal",
+            name = "Teleport crystal to Prifddinas",
+            description = "Assume you can teleport to Prifddinas using a charged or eternal teleport crystal.",
+            section = travel,
+            position = 6)
+    default boolean teleportCrystal() {
+        return false;
+    }
+
+    @ConfigItem(
+            keyName = "moonclanTeleport",
+            name = "Moonclan teleport",
+            description = "Assume you can use a Moonclan teleport spell or tablet whenever needed.",
+            section = travel,
+            position = 7)
+    default boolean moonclanTeleport() {
+        return false;
+    }
+
+    @ConfigItem(
+            keyName = "lunarIsleScroll",
+            name = "Lunar Isle scroll",
+            description = "Assume you can use a Lunar Isle teleport scroll whenever needed.",
+            section = travel,
+            position = 8)
+    default boolean lunarIsleScroll() {
+        return false;
+    }
+
+    @ConfigItem(
+            keyName = "teleportToBoat",
+            name = "Teleport to boat",
+            description = "Assume your docked boats have the required focus and you can use the spell or tablet.",
+            section = travel,
+            position = 9)
+    default boolean teleportToBoat() {
+        return false;
+    }
+
+    @ConfigItem(
+            keyName = "summonBoat",
+            name = "Summon boat",
+            description = "Assume your courier boat has the required focus and you can use the spell or tablet.",
+            section = travel,
+            position = 10)
+    default boolean summonBoat() {
+        return false;
+    }
+
+    @ConfigItem(
+            keyName = "charterShips",
+            name = "Charter ships",
+            description = "Assume all charter routes are unlocked and you have enough coins for each journey.",
+            section = travel,
+            position = 11)
+    default boolean charterShips() {
+        return false;
+    }
+
+    @ConfigSection(name = "Dock", description = "Dock settings", position = 3)
     String dock = "dock";
 
     @ConfigItem(

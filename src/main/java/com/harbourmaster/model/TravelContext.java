@@ -2,7 +2,6 @@ package com.harbourmaster.model;
 
 import com.harbourmaster.data.BoatSize;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 
 public final class TravelContext {
@@ -14,7 +13,6 @@ public final class TravelContext {
     public final boolean summonSafe;
     public final List<TravelMethod> methods;
     public final List<TravelMethod> summons;
-    public final Map<Integer, Integer> supplies;
 
     public TravelContext(
             int boat,
@@ -24,8 +22,7 @@ public final class TravelContext {
             boolean carryingCargo,
             boolean summonSafe,
             List<TravelMethod> methods,
-            List<TravelMethod> summons,
-            Map<Integer, Integer> supplies) {
+            List<TravelMethod> summons) {
         this.boat = boat;
         this.boatPort = boatPort;
         this.boatSize = boatSize;
@@ -34,7 +31,6 @@ public final class TravelContext {
         this.summonSafe = summonSafe;
         this.methods = List.copyOf(methods);
         this.summons = List.copyOf(summons);
-        this.supplies = Map.copyOf(supplies);
     }
 
     @Override
@@ -50,12 +46,11 @@ public final class TravelContext {
                 && carryingCargo == context.carryingCargo
                 && summonSafe == context.summonSafe
                 && methods.equals(context.methods)
-                && summons.equals(context.summons)
-                && supplies.equals(context.supplies);
+                && summons.equals(context.summons);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(boat, boatPort, boatSize, aboard, carryingCargo, summonSafe, methods, summons, supplies);
+        return Objects.hash(boat, boatPort, boatSize, aboard, carryingCargo, summonSafe, methods, summons);
     }
 }

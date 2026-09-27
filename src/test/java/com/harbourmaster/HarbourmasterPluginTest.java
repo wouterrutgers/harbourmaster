@@ -45,7 +45,6 @@ import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.gameval.InterfaceID;
 import net.runelite.api.gameval.InventoryID;
-import net.runelite.api.gameval.ItemID;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
@@ -63,7 +62,7 @@ public class HarbourmasterPluginTest {
     private WorldPoint blockedPosition;
     private boolean aboard;
     private boolean useTeleports;
-    private Item[] travelItems = new Item[0];
+    private boolean aldarinTeleport;
     private boolean boardOpen;
     private boolean detailsOpen;
     private Item carried;
@@ -174,15 +173,7 @@ public class HarbourmasterPluginTest {
                 return new Object[] {
                     Port.fromDatabaseRow((Integer) arguments[0]).ordinal()
                 };
-            case "getBoostedSkillLevel":
-                return 99;
             case "getItemContainer":
-                if (arguments[0].equals(InventoryID.INV)) {
-                    return ApiStub.of(ItemContainer.class, (operation, parameters) -> {
-                        assertEquals("getItems", operation);
-                        return travelItems;
-                    });
-                }
                 if (arguments[0].equals(InventoryID.SAILING_BOAT_1_CARGOHOLD)) {
                     return ApiStub.of(ItemContainer.class, (operation, parameters) -> {
                         assertEquals("getItems", operation);
@@ -240,6 +231,16 @@ public class HarbourmasterPluginTest {
             public boolean useTeleports() {
                 return useTeleports;
             }
+
+            @Override
+            public boolean aldarinTeleport() {
+                return aldarinTeleport;
+            }
+
+            @Override
+            public boolean summonBoat() {
+                return true;
+            }
         });
         field(plugin, "running").set(plugin, true);
         field(plugin, "portGraph").set(plugin, graph);
@@ -260,7 +261,7 @@ public class HarbourmasterPluginTest {
     }
 
     @Test
-    public void suppliesChangingDuringPlanningDiscardTheObsoleteTeleportRoute()
+    public void settingsChangingDuringPlanningDiscardTheObsoleteTeleportRoute()
             throws ReflectiveOperationException, InterruptedException {
         dock();
         useTeleports = true;
@@ -274,13 +275,12 @@ public class HarbourmasterPluginTest {
         varbits.put(VarbitID.SAILING_BOAT_1_PORT, B.ordinal());
         varbits.put(VarbitID.SAILING_BOAT_1_TELEPORT_FOCUS, 1);
         varbits.put(VarbitID.VARLAMORE_VISITED, 1);
-        travelItems =
-                new Item[] {new Item(ItemID.NZONE_TELETAB_ALDARIN, 1), new Item(ItemID.POH_TABLET_TELEPORTBOATTOME, 1)};
+        aldarinTeleport = true;
         plugin.onGameTick(new GameTick());
         Runnable obsolete = callbacks.poll(5, TimeUnit.SECONDS);
         assertNotNull(obsolete);
 
-        travelItems = new Item[0];
+        aldarinTeleport = false;
         plugin.onGameTick(new GameTick());
         obsolete.run();
         assertTrue(plugin.getSnapshot().route.legs.isEmpty());
@@ -345,6 +345,39 @@ public class HarbourmasterPluginTest {
         assertEquals(2, plugin.getSnapshot().route.stops.size());
         assertEquals(location, plugin.getSnapshot().currentLeg.points.get(0));
         assertEquals(List.of(task), plugin.getSnapshot().courierPlan.selectedOffers);
+    }
+
+    @Test
+    public void unavailableTravelPlanRetriesWhenTheBoatMoves() throws InterruptedException {
+        useTeleports = true;
+        aboard = true;
+        varbits.put(VarbitID.SAILING_LAST_PERSONAL_BOAT_BOARDED, 1);
+        varbits.put(VarbitID.SAILING_BOAT_1_OWNED, 1);
+        varbits.put(VarbitID.SAILING_BOAT_1_PORT, A.ordinal());
+        varbits.put(VarbitID.SAILING_TRANSMIT_IS_AT_SEA, 1);
+        varbits.put(TaskVarbits.IDS[0], task.id);
+        varbits.put(TaskVarbits.TAKEN[0], task.quantity);
+        plugin.getPorts().update(client, A);
+        blockedPosition = new WorldPoint(3000, 3100, 0);
+        location = blockedPosition;
+        plugin.onGameTick(new GameTick());
+        publishPlan();
+
+        assertFalse(plugin.getSnapshot().route.available);
+        assertFalse(plugin.isCalculatingPlan());
+        plugin.onGameTick(new GameTick());
+        assertFalse(plugin.isCalculatingPlan());
+
+        location = new WorldPoint(3001, 3100, 0);
+        plugin.onGameTick(new GameTick());
+        assertTrue(plugin.isCalculatingPlan());
+        publishPlan();
+
+        assertTrue(plugin.getSnapshot().route.available);
+        assertEquals(
+                location, plugin.getSnapshot().currentLeg.steps.get(0).points.get(0));
+        assertEquals(D, plugin.getSnapshot().nextPort());
+        assertFalse(plugin.isCalculatingPlan());
     }
 
     @Test

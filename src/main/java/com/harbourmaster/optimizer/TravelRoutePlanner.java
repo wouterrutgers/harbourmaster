@@ -21,7 +21,7 @@ import net.runelite.api.coords.WorldPoint;
 final class TravelRoutePlanner {
     private final PortGraph graph;
     private final TravelContext travel;
-    private final Map<List<Object>, List<Journey>> playerRoutes = new HashMap<>();
+    private final Map<List<Port>, List<Journey>> playerRoutes = new HashMap<>();
 
     TravelRoutePlanner(PortGraph graph, TravelContext travel) {
         this.graph = graph;
@@ -37,7 +37,7 @@ final class TravelRoutePlanner {
             Port firstStop,
             int freeSlots,
             int tasksUntilReset) {
-        if (start == null || travel.boat == 0 || travel.boatPort == null && boatPosition == null) {
+        if (travel.boat == 0 || boatPosition == null && (start == null || travel.boatPort == null)) {
             return RoutePlan.unavailable("Board your courier boat to establish its location");
         }
         if (events.isEmpty()) {
@@ -55,17 +55,7 @@ final class TravelRoutePlanner {
             stateCount *= taskLengths.get(task) + 1;
         }
         Map<Integer, List<Visit>> states = new HashMap<>();
-        Map<Integer, Integer> supplies = new HashMap<>();
-        for (TravelMethod method : java.util.stream.Stream.concat(travel.methods.stream(), travel.summons.stream())
-                .collect(java.util.stream.Collectors.toList())) {
-            method.cost.forEach((item, quantity) -> supplies.merge(item, quantity * events.size() * 3, Math::max));
-        }
-        // A journey uses at most a teleport, a charter and a summon. Larger stocks cannot run out.
-        supplies.entrySet().removeIf(entry -> travel.supplies.getOrDefault(entry.getKey(), 0) >= entry.getValue());
-        supplies.replaceAll((item, maximum) -> travel.supplies.getOrDefault(item, 0));
-        states.put(
-                0,
-                new ArrayList<>(List.of(new Visit(start, travel.boatPort, Map.copyOf(supplies), 0, null, null, null))));
+        states.put(0, new ArrayList<>(List.of(new Visit(start, travel.boatPort, 0, null, null, null))));
         for (int state = 0; state < stateCount - 1; state++) {
             if (Thread.currentThread().isInterrupted()) {
                 throw new CancellationException("Courier plan cancelled");
@@ -114,7 +104,6 @@ final class TravelRoutePlanner {
                                 new Visit(
                                         event.port,
                                         journey.boat,
-                                        journey.supplies,
                                         visit.ticks + journey.leg.travelTicks(),
                                         visit,
                                         event,
@@ -127,7 +116,7 @@ final class TravelRoutePlanner {
                 .min(java.util.Comparator.comparingDouble(visit -> visit.ticks))
                 .orElse(null);
         if (best == null) {
-            return RoutePlan.unavailable("No complete route with your available travel methods and supplies");
+            return RoutePlan.unavailable("No complete route with your enabled travel methods");
         }
         List<Visit> ordered = new ArrayList<>();
         for (Visit visit = best; visit.previous != null; visit = visit.previous) {
@@ -159,21 +148,21 @@ final class TravelRoutePlanner {
         boolean canLeave = !travel.carryingCargo && visit.boat != null;
         if (event.action == RouteEvent.Action.ACCEPT) {
             if (visit.player == event.port && visit.boat != null) {
-                result.add(new Journey(visit.boat, visit.supplies, empty(visit.player)));
+                result.add(new Journey(visit.boat, empty(visit.player)));
             } else if (canLeave) {
-                result.addAll(playerJourneys(visit.player, event.port, visit.boat, visit.supplies));
+                result.addAll(playerJourneys(visit.player, event.port, visit.boat));
             }
         }
         // A cargo action always takes place with the courier boat at this port.
         if (visit.boat == event.port && visit.player == event.port) {
-            result.add(new Journey(visit.boat, visit.supplies, empty(visit.player)));
+            result.add(new Journey(visit.boat, empty(visit.player)));
             return result;
         }
         List<Journey> returns = new ArrayList<>();
         if (visit.player == visit.boat || visit.boat == null && initial && travel.aboard) {
-            returns.add(new Journey(visit.boat, visit.supplies, empty(visit.player)));
+            returns.add(new Journey(visit.boat, empty(visit.player)));
         } else if (canLeave) {
-            returns.addAll(playerJourneys(visit.player, visit.boat, visit.boat, visit.supplies));
+            returns.addAll(playerJourneys(visit.player, visit.boat, visit.boat));
         }
         RouteLeg sailing = (visit.boat == null
                         ? graph.routeFromPosition(boatPosition, event.port)
@@ -181,33 +170,28 @@ final class TravelRoutePlanner {
                 .orElse(null);
         if (sailing != null) {
             for (Journey back : returns) {
-                result.add(new Journey(event.port, back.supplies, join(visit.player, event.port, back.leg, sailing)));
+                result.add(new Journey(event.port, join(visit.player, event.port, back.leg, sailing)));
             }
         }
         if (!loaded && travel.summonSafe && canLeave && visit.boat != event.port) {
-            for (Journey outward : playerJourneys(visit.player, event.port, visit.boat, visit.supplies)) {
+            for (Journey outward : playerJourneys(visit.player, event.port, visit.boat)) {
                 for (TravelMethod summon : travel.summons) {
-                    Map<Integer, Integer> supplies = spend(outward.supplies, summon.cost);
-                    if (supplies != null) {
-                        result.add(new Journey(
-                                event.port,
-                                supplies,
-                                join(visit.player, event.port, outward.leg, summon.leg(event.port, event.port))));
-                    }
+                    result.add(new Journey(
+                            event.port,
+                            join(visit.player, event.port, outward.leg, summon.leg(event.port, event.port))));
                 }
             }
         }
         return result;
     }
 
-    private List<Journey> playerJourneys(Port from, Port to, Port boat, Map<Integer, Integer> supplies) {
-        return playerRoutes.computeIfAbsent(
-                List.of(from, to, boat, supplies), ignored -> findPlayerJourneys(from, to, boat, supplies));
+    private List<Journey> playerJourneys(Port from, Port to, Port boat) {
+        return playerRoutes.computeIfAbsent(List.of(from, to, boat), ignored -> findPlayerJourneys(from, to, boat));
     }
 
-    private List<Journey> findPlayerJourneys(Port from, Port to, Port boat, Map<Integer, Integer> supplies) {
+    private List<Journey> findPlayerJourneys(Port from, Port to, Port boat) {
         if (from == to) {
-            return List.of(new Journey(boat, supplies, empty(from)));
+            return List.of(new Journey(boat, empty(from)));
         }
         List<Journey> result = new ArrayList<>();
         for (TravelMethod method : travel.methods) {
@@ -215,13 +199,9 @@ final class TravelRoutePlanner {
             if (destination == null || method.origin != null && method.origin != from) {
                 continue;
             }
-            Map<Integer, Integer> remaining = spend(supplies, method.cost);
-            if (remaining == null) {
-                continue;
-            }
             RouteLeg first = method.leg(from, destination);
             if (destination == to) {
-                result.add(new Journey(boat, remaining, first));
+                result.add(new Journey(boat, first));
                 continue;
             }
             if (method.kind != TravelStep.Kind.TELEPORT) {
@@ -234,48 +214,23 @@ final class TravelRoutePlanner {
                         || charter.destination != to) {
                     continue;
                 }
-                Map<Integer, Integer> afterCharter = spend(remaining, charter.cost);
-                if (afterCharter != null) {
-                    result.add(new Journey(boat, afterCharter, join(from, to, first, charter.leg(destination, to))));
-                }
+                result.add(new Journey(boat, join(from, to, first, charter.leg(destination, to))));
             }
         }
-        return result;
-    }
-
-    private static Map<Integer, Integer> spend(Map<Integer, Integer> supplies, Map<Integer, Integer> cost) {
-        for (Map.Entry<Integer, Integer> entry : cost.entrySet()) {
-            if (supplies.containsKey(entry.getKey()) && supplies.get(entry.getKey()) < entry.getValue()) {
-                return null;
-            }
-        }
-        Map<Integer, Integer> remaining = new HashMap<>(supplies);
-        cost.forEach(
-                (item, quantity) -> remaining.computeIfPresent(item, (ignored, available) -> available - quantity));
-        return Map.copyOf(remaining);
+        return result.stream()
+                .min(java.util.Comparator.comparingDouble(journey -> journey.leg.travelTicks()))
+                .map(List::of)
+                .orElse(List.of());
     }
 
     private static void add(List<Visit> visits, Visit candidate) {
         for (Visit visit : visits) {
-            if (visit.player == candidate.player && visit.boat == candidate.boat && dominates(visit, candidate)) {
+            if (visit.player == candidate.player && visit.boat == candidate.boat && visit.ticks <= candidate.ticks) {
                 return;
             }
         }
-        visits.removeIf(visit ->
-                visit.player == candidate.player && visit.boat == candidate.boat && dominates(candidate, visit));
+        visits.removeIf(visit -> visit.player == candidate.player && visit.boat == candidate.boat);
         visits.add(candidate);
-    }
-
-    private static boolean dominates(Visit first, Visit second) {
-        if (first.ticks > second.ticks) {
-            return false;
-        }
-        for (Map.Entry<Integer, Integer> entry : second.supplies.entrySet()) {
-            if (first.supplies.getOrDefault(entry.getKey(), 0) < entry.getValue()) {
-                return false;
-            }
-        }
-        return true;
     }
 
     private static RouteLeg empty(Port port) {
@@ -295,12 +250,10 @@ final class TravelRoutePlanner {
 
     private static final class Journey {
         final Port boat;
-        final Map<Integer, Integer> supplies;
         final RouteLeg leg;
 
-        Journey(Port boat, Map<Integer, Integer> supplies, RouteLeg leg) {
+        Journey(Port boat, RouteLeg leg) {
             this.boat = boat;
-            this.supplies = supplies;
             this.leg = leg;
         }
     }
@@ -308,23 +261,14 @@ final class TravelRoutePlanner {
     private static final class Visit {
         final Port player;
         final Port boat;
-        final Map<Integer, Integer> supplies;
         final double ticks;
         final Visit previous;
         final RouteEvent event;
         final RouteLeg leg;
 
-        Visit(
-                Port player,
-                Port boat,
-                Map<Integer, Integer> supplies,
-                double ticks,
-                Visit previous,
-                RouteEvent event,
-                RouteLeg leg) {
+        Visit(Port player, Port boat, double ticks, Visit previous, RouteEvent event, RouteLeg leg) {
             this.player = player;
             this.boat = boat;
-            this.supplies = supplies;
             this.ticks = ticks;
             this.previous = previous;
             this.event = event;

@@ -1,7 +1,6 @@
 package com.harbourmaster.model;
 
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import net.runelite.api.coords.WorldPoint;
 
@@ -14,7 +13,6 @@ public final class TravelMethod {
     public final double ticks;
     public final double walkingTicks;
     public final WorldPoint arrival;
-    public final Map<Integer, Integer> cost;
 
     public TravelMethod(
             Port origin,
@@ -23,8 +21,7 @@ public final class TravelMethod {
             TravelStep.Kind kind,
             String instruction,
             double ticks,
-            WorldPoint arrival,
-            Map<Integer, Integer> cost) {
+            WorldPoint arrival) {
         this(
                 origin,
                 destination,
@@ -33,8 +30,7 @@ public final class TravelMethod {
                 instruction,
                 ticks,
                 arrival,
-                arrival == null ? 0 : arrival.distanceTo2D(destination.navigationLocation) / 2.0 + 2,
-                cost);
+                arrival == null ? 0 : arrival.distanceTo2D(destination.navigationLocation) / 2.0 + 2);
     }
 
     public TravelMethod(
@@ -45,8 +41,7 @@ public final class TravelMethod {
             String instruction,
             double ticks,
             WorldPoint arrival,
-            double walkingTicks,
-            Map<Integer, Integer> cost) {
+            double walkingTicks) {
         this.origin = origin;
         this.destination = destination;
         this.boat = boat;
@@ -55,7 +50,6 @@ public final class TravelMethod {
         this.ticks = ticks;
         this.walkingTicks = walkingTicks;
         this.arrival = arrival;
-        this.cost = Map.copyOf(cost);
     }
 
     public RouteLeg leg(Port from, Port to) {
@@ -83,12 +77,11 @@ public final class TravelMethod {
                 && ticks == method.ticks
                 && walkingTicks == method.walkingTicks
                 && instruction.equals(method.instruction)
-                && Objects.equals(arrival, method.arrival)
-                && cost.equals(method.cost);
+                && Objects.equals(arrival, method.arrival);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(origin, destination, boat, kind, instruction, ticks, walkingTicks, arrival, cost);
+        return Objects.hash(origin, destination, boat, kind, instruction, ticks, walkingTicks, arrival);
     }
 }

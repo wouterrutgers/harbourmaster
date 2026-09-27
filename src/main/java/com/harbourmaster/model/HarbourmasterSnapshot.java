@@ -50,8 +50,7 @@ public final class HarbourmasterSnapshot {
         currentLeg = approach != null
                         && !approach.steps.isEmpty()
                         && approach.to == nextPort()
-                        && (dock.port != nextPort()
-                                || approach.steps.stream().anyMatch(step -> step.kind == TravelStep.Kind.SUMMON))
+                        && (dock.port != nextPort() || !approach.sailingOnly())
                 ? approach
                 : null;
         this.dock = currentLeg == null ? dock.follow(route) : DockChecklist.at(dock.port, List.of());
