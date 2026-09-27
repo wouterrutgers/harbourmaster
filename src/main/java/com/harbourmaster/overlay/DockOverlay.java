@@ -83,10 +83,7 @@ public final class DockOverlay extends Overlay {
                                             : "Gangplank to " + state.dock.port.name));
                 }
             }
-            if (port != null
-                    && object.getId() == port.noticeboardObject
-                    && config.highlightNoticeboards()
-                    && (state.route.stops.isEmpty() || port == state.dock.port && state.dock.hasAcceptance())) {
+            if (port != null && object.getId() == port.noticeboardObject && config.highlightNoticeboards()) {
                 if (state.freeSlots > 0 || config.subdueFullBoards()) {
                     draw(
                             graphics,

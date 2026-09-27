@@ -158,6 +158,15 @@ public class DockOverlayTest {
         assertEquals(0, render().getRGB(20, 20));
     }
 
+    @Test
+    public void noticeboardHighlightsWithAnActiveRouteBeforeReadingItsOffers() {
+        playerWorld = world(true);
+        plugin.getPorts().add(object(playerWorld, A.noticeboardObject, 10));
+        route = new RouteOptimizer(line()).optimize(A, tasks);
+
+        assertNotEquals(0, render().getRGB(20, 20));
+    }
+
     private BufferedImage render() {
         BufferedImage image = new BufferedImage(120, 60, BufferedImage.TYPE_INT_ARGB);
         Graphics2D graphics = image.createGraphics();
