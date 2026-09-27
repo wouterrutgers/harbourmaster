@@ -18,7 +18,7 @@ import net.runelite.api.gameval.ObjectID;
 import net.runelite.api.gameval.VarbitID;
 
 public final class PortTracker {
-    private static final int DOCK_APPROACH_DISTANCE = 3;
+    private static final int DOCK_APPROACH_DISTANCE = 5;
     private final Set<GameObject> objects = new HashSet<>();
     private Port dock;
     private Port associated;
@@ -150,7 +150,7 @@ public final class PortTracker {
         }
 
         GameObject closestBoat = null;
-        int closestDistance = DOCK_APPROACH_DISTANCE + 1;
+        int closestDistance = 4;
         for (GameObject object : objects) {
             if (!CargoHoldObjects.IDS.contains(object.getId()) || object.getWorldView() != playerView) {
                 continue;

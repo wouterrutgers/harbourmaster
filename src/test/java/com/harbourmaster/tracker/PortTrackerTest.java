@@ -226,6 +226,33 @@ public class PortTrackerTest {
     }
 
     @Test
+    public void approachingRedRockRecognizesDockBeforeReachingTheNavigationPoint() {
+        location =
+                new WorldPoint(Port.RED_ROCK.navigationLocation.getX() + 4, Port.RED_ROCK.navigationLocation.getY(), 0);
+        atSea = true;
+        tracker.add(ApiStub.of(GameObject.class, (method, arguments) -> {
+            switch (method) {
+                case "getId":
+                    return Port.RED_ROCK.gangplankObject;
+                case "getWorldView":
+                    return world;
+                case "getLocalLocation":
+                    return new LocalPoint(64, 64, WorldView.TOPLEVEL);
+                default:
+                    throw new AssertionError(method);
+            }
+        }));
+
+        tracker.update(client, null);
+        assertSame(Port.RED_ROCK, tracker.getDock());
+
+        location = new WorldPoint(
+                Port.RED_ROCK.navigationLocation.getX() + 10, Port.RED_ROCK.navigationLocation.getY(), 0);
+        tracker.update(client, null);
+        assertNull(tracker.getDock());
+    }
+
+    @Test
     public void disembarkingAtDestinationUpdatesDockBeforeAtSeaFlagClears() {
         location = Port.PORT_ROBERTS.navigationLocation;
         tracker.update(client, Port.PORT_ROBERTS);
