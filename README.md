@@ -14,6 +14,8 @@ Recommendations account for your Sailing level, available task slots and existin
 
 Routes use your boat, with no teleports or charters.
 
+Route lines follow cardinal directions and 45 degree diagonals, with a preference for fewer turns. Clearance checks account for your boat's hull and turns around obstacles.
+
 ## Settings
 
 Choose whether to show routes in the game world, on the minimap or on the world map. Enable **Show complete route** to see future sailing legs as well as your next destination. You can also adjust highlight colours, dock guidance and cargo labels in the plugin settings.

@@ -11,6 +11,7 @@ import com.harbourmaster.model.DockChecklist;
 import com.harbourmaster.model.HarbourmasterSnapshot;
 import com.harbourmaster.model.Port;
 import com.harbourmaster.model.RoutePlan;
+import com.harbourmaster.optimizer.RouteOptimizer;
 import com.harbourmaster.tracker.CargoTracker;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
@@ -37,6 +38,7 @@ public class DockOverlayTest {
     private final CargoTracker cargo = new CargoTracker();
     private Item carried;
     private Port dock = A;
+    private RoutePlan route = RoutePlan.empty();
     private final WorldView boat = boat();
     private WorldView playerWorld = boat;
     private final Player player = ApiStub.of(Player.class, (method, arguments) -> {
@@ -69,7 +71,7 @@ public class DockOverlayTest {
             Map<Integer, CargoTracker.Destination> destinations = cargo.destinations(tasks, dock);
             return new HarbourmasterSnapshot(
                     true,
-                    RoutePlan.empty(),
+                    route,
                     false,
                     4,
                     DockChecklist.at(dock, tasks),
@@ -140,6 +142,19 @@ public class DockOverlayTest {
         assertEquals(0, render().getRGB(80, 20));
 
         carried = new Item(tasks.get(0).definition.itemId, 1);
+        assertEquals(0, render().getRGB(20, 20));
+    }
+
+    @Test
+    public void shoreGangplankLeadsBackToBoatWhenReadyToSail() {
+        playerWorld = world(true);
+        plugin.getPorts().add(object(playerWorld, A.gangplankObject, 10));
+        plugin.getPorts().add(object(playerWorld, B.gangplankObject, 70));
+        route = new RouteOptimizer(line()).optimize(A, tasks);
+        assertNotEquals(0, render().getRGB(20, 20));
+        assertEquals(0, render().getRGB(80, 20));
+
+        playerWorld = boat;
         assertEquals(0, render().getRGB(20, 20));
     }
 

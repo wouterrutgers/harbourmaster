@@ -35,6 +35,7 @@ public final class SailingPathfinder implements SailingRouter {
     private static final int HEADING_STATES = DIRECTION_COUNT + 1;
     private static final int INITIAL_HEADING = DIRECTION_COUNT;
     private static final double LIVE_HEURISTIC_WEIGHT = 2;
+    private static final double TURN_COST = 1;
     private static final int LIVE_REFINEMENT_CHECKS = 4096;
     private static final Set<Integer> WATER_OVERLAYS =
             Set.of(442, 445, 448, 451, 454, 457, 460, 463, 466, 469, 565, 568, 571, 574, 577);
@@ -325,40 +326,58 @@ public final class SailingPathfinder implements SailingRouter {
         result.add(points.get(anchor));
         while (anchor < points.size() - 1) {
             int next = anchor + 1;
+            List<WorldPoint> crossing = List.of(points.get(anchor), points.get(next));
             for (int candidate = points.size() - 1; candidate > next; candidate--) {
                 WorldPoint from = points.get(anchor);
                 WorldPoint to = points.get(candidate);
-                double angle = Math.atan2(to.getY() - from.getY(), to.getX() - from.getX());
-                if (!segmentFits(from, to, boatSize)) {
+                List<WorldPoint> shortcut = crossing(from, to, boatSize);
+                if (shortcut.isEmpty()) {
                     continue;
                 }
                 if (result.size() > 1) {
                     WorldPoint previous = result.get(result.size() - 2);
-                    if (!turnFits(
-                            from,
-                            Math.atan2(from.getY() - previous.getY(), from.getX() - previous.getX()),
-                            angle,
-                            boatSize)) {
+                    if (!turnFits(from, angle(previous, from), angle(from, shortcut.get(1)), boatSize)) {
                         continue;
                     }
                 }
                 if (candidate < points.size() - 1) {
                     WorldPoint following = points.get(candidate + 1);
-                    if (!turnFits(
-                            to,
-                            angle,
-                            Math.atan2(following.getY() - to.getY(), following.getX() - to.getX()),
-                            boatSize)) {
+                    if (!turnFits(to, angle(shortcut.get(shortcut.size() - 2), to), angle(to, following), boatSize)) {
                         continue;
                     }
                 }
                 next = candidate;
+                crossing = shortcut;
                 break;
             }
-            result.add(points.get(next));
+            result.addAll(crossing.subList(1, crossing.size()));
             anchor = next;
         }
         return result;
+    }
+
+    private List<WorldPoint> crossing(WorldPoint from, WorldPoint to, BoatSize boatSize) {
+        if (segmentFits(from, to, boatSize)) {
+            return List.of(from, to);
+        }
+        int horizontal = to.getX() - from.getX();
+        int vertical = to.getY() - from.getY();
+        int diagonal = Math.min(Math.abs(horizontal), Math.abs(vertical));
+        if (diagonal == 0 || Math.abs(horizontal) == Math.abs(vertical)) {
+            return List.of();
+        }
+        int diagonalHorizontal = Integer.signum(horizontal) * diagonal;
+        int diagonalVertical = Integer.signum(vertical) * diagonal;
+        for (WorldPoint corner : List.of(
+                new WorldPoint(from.getX() + diagonalHorizontal, from.getY() + diagonalVertical, 0),
+                new WorldPoint(to.getX() - diagonalHorizontal, to.getY() - diagonalVertical, 0))) {
+            if (segmentFits(from, corner, boatSize)
+                    && segmentFits(corner, to, boatSize)
+                    && turnFits(corner, angle(from, corner), angle(corner, to), boatSize)) {
+                return List.of(from, corner, to);
+            }
+        }
+        return List.of();
     }
 
     private boolean segmentFits(WorldPoint from, WorldPoint to, BoatSize boatSize) {
@@ -368,6 +387,9 @@ public final class SailingPathfinder implements SailingRouter {
     private boolean segmentFits(WorldPoint from, WorldPoint to, BoatSize boatSize, CollisionBudget budget) {
         int horizontal = to.getX() - from.getX();
         int vertical = to.getY() - from.getY();
+        if (horizontal != 0 && vertical != 0 && Math.abs(horizontal) != Math.abs(vertical)) {
+            return false;
+        }
         double distance = Math.hypot(horizontal, vertical);
         if (distance == 0) {
             return false;
@@ -635,9 +657,10 @@ public final class SailingPathfinder implements SailingRouter {
             for (int position = 1; position < candidate.size(); position++) {
                 distance += distance(candidate.get(position - 1), candidate.get(position));
             }
-            if (distance
+            if (distance + (candidate.size() - 2) * TURN_COST
                     >= distance(points.get(index - 1), points.get(index))
                             + distance(points.get(index), next)
+                            + TURN_COST
                             - 0.0000001) {
                 return false;
             }
@@ -999,12 +1022,9 @@ public final class SailingPathfinder implements SailingRouter {
                     return true;
                 }
                 endpointsChecked = true;
-                if (segmentFits(from, to, boatSize)) {
-                    result = Optional.of(new RouteLeg(
-                            null,
-                            null,
-                            Math.hypot(to.getX() - from.getX(), to.getY() - from.getY()),
-                            List.of(from, to)));
+                List<WorldPoint> crossing = crossing(from, to, boatSize);
+                if (!crossing.isEmpty()) {
+                    result = Optional.of(routeLeg(null, null, crossing));
                     return true;
                 }
             }
@@ -1054,6 +1074,9 @@ public final class SailingPathfinder implements SailingRouter {
                     int next = key(nextX, nextY);
                     int nextState = state(next, direction);
                     double distance = visit.distance + (horizontal != 0 && vertical != 0 ? Math.sqrt(2) : 1);
+                    if (previousHeading != INITIAL_HEADING && previousHeading != direction) {
+                        distance += TURN_COST;
+                    }
                     if (distance >= distances.getOrDefault(nextState, Double.POSITIVE_INFINITY)) {
                         continue;
                     }

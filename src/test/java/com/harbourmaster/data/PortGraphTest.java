@@ -63,6 +63,13 @@ public class PortGraphTest {
                     Collections.reverse(reversedPoints);
                     assertEquals(reversedPoints, returning.get().points);
                     assertEquals(outward.get().distance, returning.get().distance, 0);
+                    for (int index = 1; index < outward.get().points.size(); index++) {
+                        WorldPoint previous = outward.get().points.get(index - 1);
+                        WorldPoint next = outward.get().points.get(index);
+                        int horizontal = next.getX() - previous.getX();
+                        int vertical = next.getY() - previous.getY();
+                        assertTrue(horizontal == 0 || vertical == 0 || Math.abs(horizontal) == Math.abs(vertical));
+                    }
                 }
             }
         }

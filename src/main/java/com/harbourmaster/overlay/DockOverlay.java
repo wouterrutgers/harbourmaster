@@ -61,7 +61,7 @@ public final class DockOverlay extends Overlay {
             if (config.highlightGangplank() && state.dock.port != null) {
                 boolean gangplank = object.getId() == ObjectID.SAILING_GANGPLANK_PROXY
                         || port == state.dock.port && object.getId() == port.gangplankObject;
-                boolean boarding = (state.depositCargo || fetchCargo)
+                boolean boarding = (state.depositCargo || fetchCargo || state.currentLeg != null)
                         && playerWorld.isTopLevel()
                         && gangplank
                         && object.getWorldView().isTopLevel();
@@ -77,7 +77,9 @@ public final class DockOverlay extends Overlay {
                             state.depositCargo || !state.dock.hasUnload() ? config.loadColor() : config.unloadColor(),
                             List.of(
                                     boarding
-                                            ? state.depositCargo ? "Board to deposit cargo" : "Board to fetch crates"
+                                            ? state.depositCargo
+                                                    ? "Board to deposit cargo"
+                                                    : fetchCargo ? "Board to fetch crates" : "Board to sail"
                                             : "Gangplank to " + state.dock.port.name));
                 }
             }

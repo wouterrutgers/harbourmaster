@@ -34,7 +34,7 @@ public class SailingPathfinderTest {
             }
         }
         SailingPathfinder pathfinder = pathfinder(0, 63, 0, 63, Map.of(0, terrain(0, 0, 0, 63, 0, 63, land)));
-        List<WorldPoint> points = List.of(point(10, 30), point(20, 45), point(40, 45), point(50, 30));
+        List<WorldPoint> points = List.of(point(10, 30), point(10, 45), point(50, 45), point(50, 30));
         RouteLeg original = new RouteLeg(null, null, measuredDistance(points), points);
 
         RouteLeg refined = pathfinder.refineRoute(original, BoatSize.RAFT);
@@ -44,31 +44,35 @@ public class SailingPathfinderTest {
         assertTrue(refined.distance < original.distance - 8);
         assertTrue(refined.points.stream().anyMatch(point -> !points.contains(point)));
         assertEquals(measuredDistance(refined.points), refined.distance, 0.00001);
+        assertSailableHeadings(refined);
     }
 
     @Test
-    public void openWaterUsesAStraightCrossingAtAnyAngle() {
+    public void openWaterUsesLongCompassHeadingsWithOneTurn() {
         SailingPathfinder pathfinder = pathfinder(0, 63, 0, 63, Map.of(0, terrain(0, 0, 0, 63, 0, 63, Set.of())));
         WorldPoint from = point(10, 12);
         WorldPoint to = point(48, 35);
 
         RouteLeg route = pathfinder.route(from, to, BoatSize.SLOOP).orElseThrow(AssertionError::new);
 
-        assertEquals(List.of(from, to), route.points);
-        assertEquals(Math.hypot(38, 23), route.distance, 0.00001);
+        assertEquals(from, route.points.get(0));
+        assertEquals(to, route.points.get(route.points.size() - 1));
+        assertEquals(3, route.points.size());
+        assertEquals(15 + 23 * Math.sqrt(2), route.distance, 0.00001);
+        assertSailableHeadings(route);
     }
 
     @Test
     public void straightCrossingCannotClipLandBesideItsCenterLine() {
         SailingPathfinder pathfinder =
-                pathfinder(0, 63, 0, 63, Map.of(0, terrain(0, 0, 0, 63, 0, 63, Set.of(tile(28, 21)))));
+                pathfinder(0, 63, 0, 63, Map.of(0, terrain(0, 0, 0, 63, 0, 63, Set.of(tile(28, 29)))));
         WorldPoint from = point(10, 10);
-        WorldPoint to = point(50, 30);
+        WorldPoint to = point(50, 50);
 
         RouteLeg route = pathfinder.route(from, to, BoatSize.SLOOP).orElseThrow(AssertionError::new);
 
         assertTrue(route.points.size() > 2);
-        assertTrue(route.distance > Math.hypot(40, 20));
+        assertTrue(route.distance > Math.hypot(40, 40));
     }
 
     @Test
@@ -318,6 +322,16 @@ public class SailingPathfinderTest {
 
     private static SailingPathfinder pathfinder(int minX, int maxX, int minY, int maxY, Map<Integer, byte[]> regions) {
         return new SailingPathfinder(new MemoryIndex(regions), minX, maxX, minY, maxY);
+    }
+
+    private static void assertSailableHeadings(RouteLeg route) {
+        for (int index = 1; index < route.points.size(); index++) {
+            int horizontal =
+                    route.points.get(index).getX() - route.points.get(index - 1).getX();
+            int vertical =
+                    route.points.get(index).getY() - route.points.get(index - 1).getY();
+            assertTrue(horizontal == 0 || vertical == 0 || Math.abs(horizontal) == Math.abs(vertical));
+        }
     }
 
     private static byte[] terrain(int regionX, int regionY, int minX, int maxX, int minY, int maxY, Set<Long> land) {
