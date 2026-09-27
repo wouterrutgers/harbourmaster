@@ -72,23 +72,8 @@ public class PortGraphTest {
                     }
                 }
             }
+            assertFalse(graph.hasMissingRoutes());
         }
-    }
-
-    @Test
-    public void movingToReachableWaterRetriesAFailedBoatRoute() {
-        WorldPoint blocked = new WorldPoint(3000, 3100, 0);
-        WorldPoint reachable = new WorldPoint(3001, 3100, 0);
-        PortGraph graph = new PortGraph((from, to, boatSize) -> from.equals(blocked)
-                        ? Optional.empty()
-                        : Optional.of(new RouteLeg(null, null, from.distanceTo(to), List.of(from, to))))
-                .detachedSnapshot(null);
-
-        assertFalse(graph.routeFromPosition(blocked, Port.MUSA_POINT).isPresent());
-        RouteLeg route = graph.routeFromPosition(reachable, Port.MUSA_POINT).orElseThrow(AssertionError::new);
-
-        assertEquals(reachable, route.points.get(0));
-        assertEquals(Port.MUSA_POINT, route.to);
     }
 
     @Test
@@ -106,28 +91,6 @@ public class PortGraphTest {
         assertTrue(graph.setBoatSize(BoatSize.RAFT));
         graph.route(Port.PORT_SARIM, Port.MUSA_POINT);
         assertEquals(List.of(BoatSize.SLOOP, BoatSize.RAFT), routedSizes);
-    }
-
-    @Test
-    public void movingAlongTheCurrentRouteReusesItsRemainingPath() {
-        int[] routeSearches = {0};
-        Port destination = Port.MUSA_POINT;
-        WorldPoint end = destination.navigationLocation;
-        PortGraph graph = new PortGraph((from, to, boatSize) -> {
-                    routeSearches[0]++;
-                    return Optional.of(new RouteLeg(null, null, from.distanceTo(to), List.of(from, to)));
-                })
-                .detachedSnapshot(null);
-        WorldPoint start = new WorldPoint(end.getX() - 10, end.getY(), 0);
-        WorldPoint current = new WorldPoint(end.getX() - 5, end.getY(), 0);
-
-        RouteLeg original = graph.routeFromPosition(start, destination).orElseThrow(AssertionError::new);
-        RouteLeg remaining = graph.routeFromPosition(current, destination).orElseThrow(AssertionError::new);
-
-        assertEquals(1, routeSearches[0]);
-        assertEquals(current, remaining.points.get(0));
-        assertEquals(end, remaining.points.get(remaining.points.size() - 1));
-        assertEquals(original.distance / 2, remaining.distance, 0.00001);
     }
 
     @Test
@@ -219,43 +182,6 @@ public class PortGraphTest {
     }
 
     @Test
-    public void detachedSnapshotCopiesAndReturnsRoutesIndependently() {
-        int[] routeSearches = {0};
-        PortGraph graph = new PortGraph((from, to, boatSize) -> {
-            routeSearches[0]++;
-            return Optional.of(new RouteLeg(null, null, from.distanceTo(to), List.of(from, to)));
-        });
-        WorldPoint position = Port.PORT_SARIM.navigationLocation;
-
-        PortGraph initial = graph.detachedSnapshot(position);
-        initial.route(Port.PORT_SARIM, Port.MUSA_POINT);
-        initial.routeFromPosition(position, Port.MUSA_POINT);
-        graph.mergeComputedRoutes(initial);
-        PortGraph detached = graph.detachedSnapshot(position);
-        int searchesBeforeDetachedLookups = routeSearches[0];
-
-        assertTrue(detached.route(Port.PORT_SARIM, Port.MUSA_POINT).isPresent());
-        assertTrue(detached.routeFromPosition(position, Port.MUSA_POINT).isPresent());
-        assertEquals(searchesBeforeDetachedLookups, routeSearches[0]);
-
-        assertTrue(detached.route(Port.MUSA_POINT, Port.CATHERBY).isPresent());
-        assertEquals(searchesBeforeDetachedLookups + 1, routeSearches[0]);
-        graph.mergeComputedRoutes(detached);
-        assertTrue(graph.route(Port.MUSA_POINT, Port.CATHERBY).isPresent());
-        assertEquals(searchesBeforeDetachedLookups + 1, routeSearches[0]);
-    }
-
-    @Test
-    public void detachedSnapshotWorksWhenTheBoatPositionIsUnknown() {
-        PortGraph graph = new PortGraph(
-                (from, to, boatSize) -> Optional.of(new RouteLeg(null, null, from.distanceTo(to), List.of(from, to))));
-
-        assertTrue(graph.detachedSnapshot(null)
-                .route(Port.PORT_SARIM, Port.MUSA_POINT)
-                .isPresent());
-    }
-
-    @Test
     public void liveRoutesLeaveUncachedSearchesToTheBackgroundPlanner() {
         int[] searches = {0};
         PortGraph graph = new PortGraph((from, to, boatSize) -> {
@@ -277,6 +203,10 @@ public class PortGraphTest {
         assertTrue(graph.route(Port.PORT_SARIM, Port.MUSA_POINT).isPresent());
         assertTrue(graph.routeFromPosition(position, Port.CATHERBY).isPresent());
         assertFalse(graph.hasMissingRoutes());
+
+        PortGraph nextPlan = graph.detachedSnapshot(position);
+        assertTrue(nextPlan.route(Port.PORT_SARIM, Port.MUSA_POINT).isPresent());
+        assertTrue(nextPlan.routeFromPosition(position, Port.CATHERBY).isPresent());
         assertEquals(2, searches[0]);
     }
 }

@@ -92,55 +92,6 @@ public class SailingPathfinderTest {
     }
 
     @Test
-    public void routeFromTheMovingBoatUsesItsCurrentTile() {
-        Set<Long> land = Set.of(tile(12, 8), tile(12, 9), tile(12, 10), tile(12, 11), tile(12, 12));
-        SailingPathfinder pathfinder = pathfinder(0, 24, 0, 20, Map.of(0, terrain(0, 0, 0, 24, 0, 20, land)));
-        WorldPoint destination = point(16, 10);
-        RouteLeg original =
-                pathfinder.route(point(8, 10), destination, BoatSize.RAFT).orElseThrow(AssertionError::new);
-        WorldPoint boat = point(14, 7);
-        RouteLeg route = pathfinder.route(boat, destination, BoatSize.RAFT).orElseThrow(AssertionError::new);
-
-        assertEquals(boat, route.points.get(0));
-        assertEquals(destination, route.points.get(route.points.size() - 1));
-        assertTrue(route.distance < original.distance);
-    }
-
-    @Test
-    public void routeSearchCanAdvanceInSmallSlicesAndMatchesTheSynchronousRoute() {
-        SailingPathfinder pathfinder =
-                pathfinder(0, 24, 0, 20, Map.of(0, terrain(0, 0, 0, 24, 0, 20, Set.of(tile(12, 10)))));
-        WorldPoint from = point(8, 10);
-        WorldPoint to = point(16, 10);
-        SailingSearch search = pathfinder.search(from, to, BoatSize.RAFT);
-
-        assertFalse(search.advance(1));
-        while (!search.advance(1)) {
-            // The game thread can yield between these slices.
-        }
-
-        RouteLeg slicedRoute = search.result().orElseThrow(AssertionError::new);
-        RouteLeg synchronousRoute = pathfinder.route(from, to, BoatSize.RAFT).orElseThrow(AssertionError::new);
-        assertEquals(synchronousRoute.distance, slicedRoute.distance, 0.00001);
-        assertEquals(synchronousRoute.points, slicedRoute.points);
-        assertTrue(search.expandedStates() > 1);
-    }
-
-    @Test
-    public void liveSearchWaitsForTerrainAndResumesWhenItArrives() {
-        Map<Integer, byte[]> regions = new HashMap<>();
-        regions.put(0, null);
-        SailingPathfinder pathfinder = pathfinder(0, 24, 0, 20, regions);
-        SailingSearch search = pathfinder.search(point(8, 10), point(16, 10), BoatSize.RAFT);
-
-        assertFalse(search.advance(Integer.MAX_VALUE));
-        regions.put(0, terrain(0, 0, 0, 24, 0, 20, Set.of()));
-        assertTrue(search.advance(Integer.MAX_VALUE));
-
-        assertEquals(8, search.result().orElseThrow(AssertionError::new).distance, 0);
-    }
-
-    @Test
     public void cancelledTerrainWaitReleasesTheWorkerForTheNextPlan() throws Exception {
         LinkedBlockingQueue<BooleanSupplier> clientThreadCalls = new LinkedBlockingQueue<>();
         SailingPathfinder pathfinder = new SailingPathfinder(

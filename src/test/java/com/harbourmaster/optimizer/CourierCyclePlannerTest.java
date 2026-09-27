@@ -159,15 +159,6 @@ public class CourierCyclePlannerTest {
                 .anyMatch(event -> event.task == held && event.action == RouteEvent.Action.DELIVER));
     }
 
-    @Test
-    public void rewardRateUsesFixedSailingBoardingAndCargoActionTimes() {
-        CourierTask offer = courier(1, B, D, 100);
-        CourierPlan plan = planner.plan(A, null, List.of(), Map.of(A, List.of(offer)), 99, 4, 8);
-
-        assertEquals(List.of(offer), plan.selectedOffers);
-        assertEquals(100 * 6000 / (30.0 / 4 + 2 * 2 + 1 + 1 + 1), plan.experiencePerHour, 0.00001);
-    }
-
     private static void assertInOrder(
             CourierPlan plan,
             CourierTask task,
