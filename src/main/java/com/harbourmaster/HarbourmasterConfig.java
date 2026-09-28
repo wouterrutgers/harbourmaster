@@ -1,5 +1,6 @@
 package com.harbourmaster;
 
+import com.harbourmaster.model.BoatFocus;
 import java.awt.Color;
 import net.runelite.client.config.Alpha;
 import net.runelite.client.config.Config;
@@ -238,7 +239,7 @@ public interface HarbourmasterConfig extends Config {
     @ConfigItem(
             keyName = "teleportToBoat",
             name = "Teleport to boat",
-            description = "Assume your docked boats have the required focus and you can use the spell or tablet.",
+            description = "Use the spell or tablet to reach boats configured with a greater teleport focus.",
             section = travel,
             position = 9)
     default boolean teleportToBoat() {
@@ -248,7 +249,7 @@ public interface HarbourmasterConfig extends Config {
     @ConfigItem(
             keyName = "summonBoat",
             name = "Summon boat",
-            description = "Assume your courier boat has the required focus and you can use the spell or tablet.",
+            description = "Use the spell or tablet to summon your courier boat when configured with either focus.",
             section = travel,
             position = 10)
     default boolean summonBoat() {
@@ -265,7 +266,60 @@ public interface HarbourmasterConfig extends Config {
         return false;
     }
 
-    @ConfigSection(name = "Dock", description = "Dock settings", position = 3)
+    @ConfigSection(name = "Boat", description = "Choose the teleport focus fitted to each boat.", position = 3)
+    String boat = "boat";
+
+    @ConfigItem(
+            keyName = "boat1Focus",
+            name = "Boat 1",
+            description = "A teleport focus allows summoning. A greater focus also allows teleporting to this boat.",
+            section = boat,
+            position = 0)
+    default BoatFocus boat1Focus() {
+        return BoatFocus.NONE;
+    }
+
+    @ConfigItem(
+            keyName = "boat2Focus",
+            name = "Boat 2",
+            description = "A teleport focus allows summoning. A greater focus also allows teleporting to this boat.",
+            section = boat,
+            position = 1)
+    default BoatFocus boat2Focus() {
+        return BoatFocus.NONE;
+    }
+
+    @ConfigItem(
+            keyName = "boat3Focus",
+            name = "Boat 3",
+            description = "A teleport focus allows summoning. A greater focus also allows teleporting to this boat.",
+            section = boat,
+            position = 2)
+    default BoatFocus boat3Focus() {
+        return BoatFocus.NONE;
+    }
+
+    @ConfigItem(
+            keyName = "boat4Focus",
+            name = "Boat 4",
+            description = "A teleport focus allows summoning. A greater focus also allows teleporting to this boat.",
+            section = boat,
+            position = 3)
+    default BoatFocus boat4Focus() {
+        return BoatFocus.NONE;
+    }
+
+    @ConfigItem(
+            keyName = "boat5Focus",
+            name = "Boat 5",
+            description = "A teleport focus allows summoning. A greater focus also allows teleporting to this boat.",
+            section = boat,
+            position = 4)
+    default BoatFocus boat5Focus() {
+        return BoatFocus.NONE;
+    }
+
+    @ConfigSection(name = "Dock", description = "Dock settings", position = 4)
     String dock = "dock";
 
     @ConfigItem(

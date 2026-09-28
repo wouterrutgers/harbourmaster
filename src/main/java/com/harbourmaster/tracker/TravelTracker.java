@@ -4,6 +4,7 @@ import com.harbourmaster.HarbourmasterConfig;
 import com.harbourmaster.data.BoatSize;
 import com.harbourmaster.data.CharterRoutes;
 import com.harbourmaster.model.ActiveTask;
+import com.harbourmaster.model.BoatFocus;
 import com.harbourmaster.model.Port;
 import com.harbourmaster.model.TravelContext;
 import com.harbourmaster.model.TravelMethod;
@@ -12,6 +13,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 import net.runelite.api.Client;
@@ -59,11 +61,15 @@ public final class TravelTracker {
         InventoryID.SAILING_BOAT_5_CARGOHOLD
     };
     private final Map<Integer, Port> docks = new HashMap<>();
+    private final Map<Integer, Integer> savedBoatDocks = new HashMap<>();
+    private final Map<Integer, Port> boatPorts = new HashMap<>();
     private final Map<Integer, List<Item>> contents = new HashMap<>();
     private final Map<WorldPoint, Port> arrivals = new HashMap<>();
     private int courierBoat;
 
     public void clear() {
+        savedBoatDocks.clear();
+        boatPorts.clear();
         contents.clear();
         arrivals.clear();
         courierBoat = 0;
@@ -80,7 +86,7 @@ public final class TravelTracker {
                 && client.getVarbitValue(VarbitID.SAILING_BT_GWENITH_GLIDE_MASTER_STATE) != 2;
     }
 
-    public TravelContext read(Client client, List<ActiveTask> tasks, HarbourmasterConfig config) {
+    public TravelContext read(Client client, List<ActiveTask> tasks, HarbourmasterConfig config, Port currentDock) {
         if (docks.isEmpty()) {
             for (Port port : Port.values()) {
                 docks.put(
@@ -94,7 +100,10 @@ public final class TravelTracker {
         }
         boolean aboard = client.getLocalPlayer() != null
                 && !client.getLocalPlayer().getWorldView().isTopLevel();
-        boolean atSea = aboard && client.getVarbitValue(VarbitID.SAILING_TRANSMIT_IS_AT_SEA) != 0;
+        BoatFocus[] focuses = {
+            config.boat1Focus(), config.boat2Focus(), config.boat3Focus(), config.boat4Focus(), config.boat5Focus()
+        };
+        Port courierPort = null;
         List<TravelMethod> methods = new ArrayList<>();
         List<TravelMethod> summons = new ArrayList<>();
         if (config.sailorsAmuletPandemonium()) {
@@ -129,12 +138,23 @@ public final class TravelTracker {
             if (hold != null) {
                 contents.put(boat, List.of(hold.getItems()));
             }
-            Port port = docks.get(client.getVarbitValue(DOCK[boat - 1]));
-            if (config.teleportToBoat() && port != null && !(atSea && boat == lastBoat)) {
+            int savedDock = client.getVarbitValue(DOCK[boat - 1]);
+            if (!Objects.equals(savedBoatDocks.put(boat, savedDock), savedDock)) {
+                boatPorts.put(boat, docks.get(savedDock));
+            }
+            // Keep an observed arrival after disembarking until the saved dock changes.
+            if (aboard && boat == lastBoat) {
+                boatPorts.put(boat, currentDock);
+            }
+            Port port = boatPorts.get(boat);
+            if (boat == courierBoat) {
+                courierPort = port;
+            }
+            if (config.teleportToBoat() && focuses[boat - 1] == BoatFocus.GREATER_TELEPORT_FOCUS && port != null) {
                 methods.add(new TravelMethod(
                         null, port, boat, TravelStep.Kind.TELEPORT, "Teleport to boat " + boat, 5, null));
             }
-            if (config.summonBoat() && boat == courierBoat && port != null) {
+            if (config.summonBoat() && focuses[boat - 1] != BoatFocus.NONE && boat == courierBoat && port != null) {
                 summons.add(new TravelMethod(null, port, boat, TravelStep.Kind.SUMMON, "Summon boat " + boat, 5, null));
             }
         }
@@ -174,9 +194,7 @@ public final class TravelTracker {
         }
         return new TravelContext(
                 courierBoat,
-                courierBoat >= 1 && courierBoat <= 5 && !(atSea && lastBoat == courierBoat)
-                        ? docks.get(client.getVarbitValue(DOCK[courierBoat - 1]))
-                        : null,
+                courierPort,
                 courierBoat >= 1 && courierBoat <= 5
                         ? BoatSize.values()[client.getVarbitValue(TYPE[courierBoat - 1])]
                         : null,

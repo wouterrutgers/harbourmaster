@@ -18,6 +18,8 @@ In **Teleports and charter ships**, enable **Use teleports and charter ships** a
 
 Enabled methods are assumed available whenever the route needs them. The plugin does not check your gear, spellbook, levels, unlocks, charges, runes or coins. Make sure you have the required setup and supplies. Enabling charter ships assumes access to every charter destination.
 
+In **Boat**, set the focus fitted to boats 1 through 5: **None**, **Teleport focus** or **Greater teleport focus**. A teleport focus allows summoning; a greater focus also allows teleporting to that boat. Each boat defaults to **None**. Enable the corresponding spell or tablet option in **Teleports and charter ships** as well.
+
 You can leave a loaded boat docked while collecting known offers at other ports, then return to it. Open your courier boat's cargo hold once so its contents can be checked before recommending a summon. The planner will not teleport while you or your crew carry crates, or summon a boat with unrecognised contents.
 
 The route status shows travel instructions and estimated time. Actual time varies with wind, boosts, walking obstacles and cargo handling.

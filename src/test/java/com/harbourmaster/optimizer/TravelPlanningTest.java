@@ -16,6 +16,30 @@ import org.junit.Test;
 
 public class TravelPlanningTest {
     @Test
+    public void remainingBoardOffersStayRecommendedBeforePickingUpAcceptedTasks() {
+        List<CourierTask> offers = List.of(courier(1, A, B, 1000), courier(2, A, C, 1000), courier(3, A, D, 1000));
+        RouteOptimizer optimizer = new RouteOptimizer(line(), context(false, true, List.of(), List.of()));
+        for (int acceptedCount = 1; acceptedCount <= offers.size(); acceptedCount++) {
+            List<ActiveTask> held = offers.subList(0, acceptedCount).stream()
+                    .map(task -> accepted(task))
+                    .collect(Collectors.toList());
+            List<CourierTask> remaining = offers.subList(acceptedCount, offers.size());
+            RoutePlan route = optimizer.optimizeWithOffers(A, null, held, remaining, remaining.size(), 8);
+            HarbourmasterSnapshot snapshot = new HarbourmasterSnapshot(
+                    true, route, true, remaining.size(), DockChecklist.at(A, held), Map.of(), false);
+
+            assertTrue(route.available);
+            for (CourierTask offer : remaining) {
+                assertTrue(snapshot.recommends(offer));
+            }
+            assertEquals(remaining.isEmpty() ? offers.size() : remaining.size(), snapshot.dock.actions.size());
+            assertTrue(snapshot.dock.actions.stream()
+                    .allMatch(event -> event.action
+                            == (remaining.isEmpty() ? RouteEvent.Action.PICKUP : RouteEvent.Action.ACCEPT)));
+        }
+    }
+
+    @Test
     public void noticeboardPlanningUsesGeneratedPortalPathsForEveryBoatSize() {
         PortGraph graph = new PortGraph((from, to, size) -> {
             throw new AssertionError("Noticeboard planning must use generated sailing routes");

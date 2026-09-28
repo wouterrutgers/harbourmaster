@@ -135,7 +135,13 @@ final class TravelRoutePlanner {
             }
             RouteStop previous = stops.remove(stops.size() - 1);
             List<RouteEvent> grouped = new ArrayList<>(previous.events);
-            grouped.add(visit.event);
+            int positionInStop = grouped.size();
+            if (visit.event.action == RouteEvent.Action.ACCEPT) {
+                while (positionInStop > 0 && grouped.get(positionInStop - 1).action == RouteEvent.Action.PICKUP) {
+                    positionInStop--;
+                }
+            }
+            grouped.add(positionInStop, visit.event);
             stops.add(new RouteStop(visit.player, grouped, previous.arrival));
         }
         return new RoutePlan(

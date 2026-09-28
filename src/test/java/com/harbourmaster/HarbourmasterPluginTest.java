@@ -5,6 +5,7 @@ import static org.junit.Assert.*;
 
 import com.harbourmaster.data.PortGraph;
 import com.harbourmaster.data.PortTaskCatalog;
+import com.harbourmaster.model.BoatFocus;
 import com.harbourmaster.model.CourierTask;
 import com.harbourmaster.model.Port;
 import com.harbourmaster.model.RouteEvent;
@@ -241,6 +242,16 @@ public class HarbourmasterPluginTest {
             public boolean summonBoat() {
                 return true;
             }
+
+            @Override
+            public boolean teleportToBoat() {
+                return true;
+            }
+
+            @Override
+            public BoatFocus boat1Focus() {
+                return BoatFocus.GREATER_TELEPORT_FOCUS;
+            }
         });
         field(plugin, "running").set(plugin, true);
         field(plugin, "portGraph").set(plugin, graph);
@@ -258,6 +269,42 @@ public class HarbourmasterPluginTest {
     @After
     public void shutDown() {
         planner.shutdownNow();
+    }
+
+    @Test
+    public void arrivingAboardKeepsDeliveryGuidanceWhenTheSavedBoatDockIsStale()
+            throws ReflectiveOperationException, InterruptedException {
+        useTeleports = true;
+        aboard = true;
+        CourierTask delivery = courier(1, A, B, 1000);
+        PortTaskCatalog catalog = (PortTaskCatalog) field(plugin, "catalog").get(plugin);
+        field(catalog, "byId").set(catalog, Map.of(delivery.id, delivery));
+        varbits.put(TaskVarbits.IDS[0], delivery.id);
+        varbits.put(TaskVarbits.TAKEN[0], delivery.quantity);
+        varbits.put(VarbitID.SAILING_LAST_PERSONAL_BOAT_BOARDED, 1);
+        varbits.put(VarbitID.SAILING_BOAT_1_OWNED, 1);
+        varbits.put(VarbitID.SAILING_BOAT_1_PORT, A.ordinal());
+        varbits.put(VarbitID.SAILING_TRANSMIT_IS_AT_SEA, 1);
+        location = new WorldPoint(B.navigationLocation.getX() - 30, B.navigationLocation.getY(), 0);
+        plugin.onGameTick(new GameTick());
+        publishPlan();
+        assertTrue(plugin.getSnapshot().sailingNext());
+
+        dock();
+        varbits.put(VarbitID.SAILING_TRANSMIT_IS_AT_SEA, 0);
+        plugin.onGameTick(new GameTick());
+        publishPlan();
+
+        assertNull(plugin.getSnapshot().currentLeg);
+        assertTrue(plugin.getSnapshot().dock.hasUnload());
+        assertEquals(delivery.quantity, plugin.getSnapshot().dock.actions.get(0).quantity);
+        assertTrue(plugin.shouldUnloadCargo());
+
+        aboard = false;
+        plugin.onGameTick(new GameTick());
+        publishPlan();
+        assertNull(plugin.getSnapshot().currentLeg);
+        assertTrue(plugin.getSnapshot().dock.hasUnload());
     }
 
     @Test
