@@ -81,21 +81,27 @@ public final class PortGraph {
 
     public Optional<RouteLeg> routeFromPosition(WorldPoint position, Port destination) {
         RouteLeg previous = shortcutBoatRoutes.get(destination);
-        if (shortcuts && previous != null) {
-            Optional<RouteLeg> remaining = remainingShortcut(previous, position);
-            if (remaining.isPresent()) {
-                shortcutBoatRoutes.put(destination, remaining.get());
-                return remaining;
+        Optional<RouteLeg> remaining =
+                shortcuts && previous != null ? remainingShortcut(previous, position) : Optional.empty();
+        // Skip direct searches only when even straight sailing cannot beat the cached journey.
+        if (remaining.isEmpty()
+                || distance(position, destination.navigationLocation) / 4
+                        < remaining.get().travelTicks()) {
+            Optional<RouteLeg> sailing = sailingFromPosition(position, destination);
+            if (sailing.isPresent()
+                    && (remaining.isEmpty()
+                            || sailing.get().travelTicks() < remaining.get().travelTicks())) {
+                remaining = sailing;
             }
-            shortcutBoatRoutes.remove(destination);
         }
-        Optional<RouteLeg> route =
-                withShortcuts(null, position, destination, sailingFromPosition(position, destination));
+        Optional<RouteLeg> route = withShortcuts(null, position, destination, remaining);
+        shortcutBoatRoutes.remove(destination);
         route.filter(leg -> !leg.sailingOnly()).ifPresent(leg -> shortcutBoatRoutes.put(destination, leg));
         return route;
     }
 
     private static Optional<RouteLeg> remainingShortcut(RouteLeg route, WorldPoint position) {
+        RouteLeg best = null;
         for (int index = 0; index < route.steps.size(); index++) {
             TravelStep step = route.steps.get(index);
             if (step.kind != TravelStep.Kind.SAIL) {
@@ -117,9 +123,12 @@ public final class PortGraph {
                     }
                 }
             }
-            return Optional.of(new RouteLeg(null, route.to, distance, List.of(), steps));
+            RouteLeg candidate = new RouteLeg(null, route.to, distance, List.of(), steps);
+            if (best == null || candidate.travelTicks() < best.travelTicks()) {
+                best = candidate;
+            }
         }
-        return Optional.empty();
+        return Optional.ofNullable(best);
     }
 
     private Optional<RouteLeg> sailingFromPosition(WorldPoint position, Port destination) {
