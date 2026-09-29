@@ -41,14 +41,30 @@ public final class HarbourmasterSnapshot {
         this.route = route;
         this.boardOpen = boardOpen;
         this.freeSlots = freeSlots;
-        this.dock = dock.follow(route);
         this.cargo = Map.copyOf(cargo);
         this.depositCargo = depositCargo;
         this.courierPlan = courierPlan;
-        currentLeg = !route.legs.isEmpty() && route.legs.get(0).to == nextPort() && dock.port != nextPort()
-                ? route.legs.get(0)
+        RouteLeg approach = !route.stops.isEmpty() && route.stops.get(0).arrival != null
+                ? route.stops.get(0).arrival
+                : route.legs.stream().findFirst().orElse(null);
+        currentLeg = approach != null
+                        && !approach.steps.isEmpty()
+                        && approach.to == nextPort()
+                        && (dock.port != nextPort() || !approach.sailingOnly())
+                ? approach
                 : null;
-        navigation = List.copyOf(route.legs.stream().map(NavigationPath::new).collect(Collectors.toList()));
+        this.dock = currentLeg == null ? dock.follow(route) : dock.withoutActions();
+        navigation = List.copyOf(route.legs.stream()
+                .flatMap(leg -> leg.steps.stream()
+                        .filter(step -> step.kind == TravelStep.Kind.SAIL)
+                        .map(step -> new NavigationPath(leg, step.points)))
+                .collect(Collectors.toList()));
+    }
+
+    public boolean sailingNext() {
+        return currentLeg != null
+                && !currentLeg.steps.isEmpty()
+                && currentLeg.steps.get(0).kind == TravelStep.Kind.SAIL;
     }
 
     public static HarbourmasterSnapshot empty() {

@@ -10,9 +10,12 @@ import com.harbourmaster.model.ActiveTask;
 import com.harbourmaster.model.CourierPlan;
 import com.harbourmaster.model.CourierTask;
 import com.harbourmaster.model.DockChecklist;
+import com.harbourmaster.model.DockGuidance;
 import com.harbourmaster.model.HarbourmasterSnapshot;
 import com.harbourmaster.model.Port;
 import com.harbourmaster.model.RoutePlan;
+import com.harbourmaster.model.TravelContext;
+import com.harbourmaster.model.TravelStep;
 import com.harbourmaster.optimizer.CourierCyclePlanner;
 import com.harbourmaster.optimizer.RouteOptimizer;
 import com.harbourmaster.overlay.CargoOverlay;
@@ -29,6 +32,7 @@ import com.harbourmaster.tracker.NoticeboardTracker;
 import com.harbourmaster.tracker.OfferCycleTracker;
 import com.harbourmaster.tracker.PortTracker;
 import com.harbourmaster.tracker.RouteTracker;
+import com.harbourmaster.tracker.TravelTracker;
 import java.time.Clock;
 import java.util.Arrays;
 import java.util.List;
@@ -47,6 +51,8 @@ import net.runelite.api.events.GameObjectDespawned;
 import net.runelite.api.events.GameObjectSpawned;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.events.GroundObjectDespawned;
+import net.runelite.api.events.GroundObjectSpawned;
 import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.events.WorldViewUnloaded;
 import net.runelite.api.gameval.InterfaceID;
@@ -117,6 +123,10 @@ public class HarbourmasterPlugin extends Plugin {
     private RouteTracker routeTracker;
     private CourierCyclePlanner cyclePlanner;
     private final OfferCycleTracker offerCycles = new OfferCycleTracker();
+    private final TravelTracker travelTracker = new TravelTracker();
+    private TravelContext travelContext;
+    private Port planStart;
+
     private volatile HarbourmasterSnapshot snapshot = HarbourmasterSnapshot.empty();
     private volatile boolean running;
     private List<Object> previousInputs;
@@ -209,6 +219,16 @@ public class HarbourmasterPlugin extends Plugin {
     }
 
     @Subscribe
+    public void onGroundObjectSpawned(GroundObjectSpawned event) {
+        ports.add(event.getGroundObject());
+    }
+
+    @Subscribe
+    public void onGroundObjectDespawned(GroundObjectDespawned event) {
+        ports.remove(event.getGroundObject());
+    }
+
+    @Subscribe
     public void onWorldViewUnloaded(WorldViewUnloaded event) {
         ports.unload(event.getWorldView());
     }
@@ -230,6 +250,8 @@ public class HarbourmasterPlugin extends Plugin {
         guidanceActivity.clear();
         guidanceActive = false;
         ports.clear();
+        travelTracker.clear();
+        travelContext = null;
         noticeboard.clear();
         offerCycles.clear();
         clearPlan();
@@ -265,20 +287,47 @@ public class HarbourmasterPlugin extends Plugin {
         }
         noticeboard.scan(client, catalog);
         ports.update(client, noticeboard.isOpen() ? noticeboard.getPort() : null);
-        if (portGraph.setBoatSize(ports.getBoatSize())) {
-            clearPlan();
-        }
         List<ActiveTask> held = activeTasks.read(
                 client::getVarbitValue, client::getVarpValue, catalog::byId, catalog::isIgnoredTask, ports.getStart());
+        TravelContext availableTravel =
+                config.useTeleports() ? travelTracker.read(client, held, config, ports.getDock()) : null;
+        boolean leavingDock = travelContext != null
+                && availableTravel != null
+                && travelContext.boat == availableTravel.boat
+                && travelContext.boatPort != null
+                && availableTravel.boatPort == null
+                && availableTravel.aboard
+                && snapshot.sailingNext();
+        if (!java.util.Objects.equals(travelContext, availableTravel)) {
+            if (!leavingDock) {
+                clearPlan();
+            }
+            travelContext = availableTravel;
+        }
+        BoatSize routeBoatSize =
+                travelContext != null && travelContext.boatSize != null ? travelContext.boatSize : ports.getBoatSize();
+        if (portGraph.setBoatSize(routeBoatSize)) {
+            clearPlan();
+            previousInputs = null;
+        }
+        planStart = travelContext == null ? ports.getStart() : travelTracker.playerPort(client, ports, travelContext);
+        if (portGraph.setShortcuts(travelTracker.shortcutsAvailable(client, travelContext))) {
+            clearPlan();
+            previousInputs = null;
+        }
         guidanceActive = guidanceActivity.update(
-                        held.stream().anyMatch(task -> !task.isFinished()),
+                        !held.isEmpty(),
                         noticeboard.isOpen() || noticeboard.isDetailsOpen() || noticeboard.isOpeningDetails(),
                         clock.instant())
-                && (ports.getDock() != null
+                && (travelContext != null
+                        || ports.getDock() != null
                         || client.getLocalPlayer() != null
                                 && !client.getLocalPlayer().getWorldView().isTopLevel());
         int completedTasks = client.getVarbitValue(VarbitID.PORT_TASKS_COMPLETED_TODAY);
-        offerCycles.observe(completedTasks, noticeboard.isOpen() ? noticeboard.getOffers() : List.of());
+        offerCycles.observe(
+                completedTasks,
+                noticeboard.isOpen() ? ports.getStart() : null,
+                noticeboard.isOpen() ? noticeboard.getOffers() : List.of());
         if (noticeboard.isDetailsOpen() || noticeboard.isOpeningDetails()) {
             return;
         }
@@ -293,17 +342,18 @@ public class HarbourmasterPlugin extends Plugin {
                 noticeboard.getOffers(),
                 noticeboard.getPort(),
                 noticeboard.isOpen(),
-                ports.getStart(),
+                planStart,
                 ports.getBoatPosition(),
                 ports.getDock(),
-                ports.getBoatSize(),
+                routeBoatSize,
                 level,
                 freeSlots,
                 depositCargo,
                 config.enableOptimizer(),
                 config.rankOffers(),
                 completedTasks,
-                observedOffers);
+                observedOffers,
+                travelContext);
         if (inputs.equals(previousInputs)) {
             return;
         }
@@ -311,7 +361,8 @@ public class HarbourmasterPlugin extends Plugin {
         RoutePlan route;
         CourierPlan courierPlan;
         if (config.enableOptimizer()) {
-            courierPlan = updatePlan(held, observedOffers, level, freeSlots, offerCycles.tasksUntilReset());
+            courierPlan =
+                    updatePlan(held, observedOffers, level, freeSlots, offerCycles.tasksUntilReset(), leavingDock);
             route = courierPlan == null ? RoutePlan.empty() : courierPlan.route;
         } else {
             clearPlan();
@@ -334,31 +385,57 @@ public class HarbourmasterPlugin extends Plugin {
             Map<Port, List<CourierTask>> observedOffers,
             int level,
             int freeSlots,
-            int tasksUntilReset) {
+            int tasksUntilReset,
+            boolean leavingDock) {
         List<Object> inputs = Arrays.asList(
                 held,
                 observedOffers,
                 level,
                 freeSlots,
-                ports.getStart(),
+                planStart,
                 ports.getBoatSize(),
                 config.rankOffers(),
                 tasksUntilReset);
         if (!inputs.equals(previousPlanInputs)
+                || leavingDock
                 || pendingPlanRequest != null
                         && pendingPlanRequest.boatPosition != null
                         && ports.getBoatPosition() == null) {
+            CourierPlan routeToUpdate = leavingDock && pendingPlanRequest == null && inputs.equals(previousPlanInputs)
+                    ? previousCourierPlan
+                    : null;
             previousPlanInputs = inputs;
-            requestPlan(held, observedOffers, level, freeSlots, tasksUntilReset, null);
+            requestPlan(held, observedOffers, level, freeSlots, tasksUntilReset, routeToUpdate);
         }
         if (previousCourierPlan == null || pendingPlanRequest != null) {
+            return previousPlanRequest != null
+                            && previousPlanRequest.held.equals(held)
+                            && previousPlanRequest.tasksUntilReset == tasksUntilReset
+                    ? previousCourierPlan
+                    : null;
+        }
+
+        if (!previousCourierPlan.available) {
+            if (!java.util.Objects.equals(previousPlanRequest.boatPosition, ports.getBoatPosition())) {
+                requestPlan(held, observedOffers, level, freeSlots, tasksUntilReset, null);
+            }
             return previousCourierPlan;
         }
 
-        CourierPlan plan = previousCourierPlan.selectedOffers.isEmpty()
+        if (travelContext != null
+                && (ports.getBoatPosition() == null
+                        || previousCourierPlan.route.legs.stream()
+                                .findFirst()
+                                .map(leg -> leg.steps.stream()
+                                        .anyMatch(step -> step.kind != TravelStep.Kind.SAIL
+                                                && step.kind != TravelStep.Kind.PORTAL))
+                                .orElse(true))) {
+            return previousCourierPlan;
+        }
+        CourierPlan plan = travelContext == null && previousCourierPlan.selectedOffers.isEmpty()
                 ? cyclePlanner.withRoute(
-                        previousCourierPlan, routeTracker.update(ports.getStart(), ports.getBoatPosition(), held))
-                : cyclePlanner.relocate(previousCourierPlan, ports.getStart(), ports.getBoatPosition());
+                        previousCourierPlan, routeTracker.update(planStart, ports.getBoatPosition(), held))
+                : cyclePlanner.relocate(previousCourierPlan, planStart, ports.getBoatPosition());
         if (portGraph.hasMissingRoutes()) {
             portGraph.clearMissingRoutes();
             requestPlan(
@@ -391,7 +468,7 @@ public class HarbourmasterPlugin extends Plugin {
                 IndexDataBase mapIndex = client.getIndex(SailingPathfinder.MAP_INDEX_ID);
                 portGraph = new PortGraph(new SailingPathfinder(mapIndex, task -> clientThread.invokeLater(task)));
                 for (BoatSize boatSize : BoatSize.values()) {
-                    portGraph.loadPortRoutes(boatSize, SailingRouteCache.load(boatSize));
+                    SailingRouteCache.load(portGraph, boatSize);
                 }
                 RouteOptimizer optimizer = new RouteOptimizer(portGraph);
                 routeTracker = new RouteTracker(optimizer);
@@ -410,7 +487,7 @@ public class HarbourmasterPlugin extends Plugin {
             int tasksUntilReset,
             CourierPlan routeToUpdate) {
         CourierPlanRequest request = new CourierPlanRequest(
-                ports.getStart(),
+                planStart,
                 ports.getBoatPosition(),
                 held,
                 config.rankOffers() ? observedOffers : Map.of(),
@@ -418,7 +495,8 @@ public class HarbourmasterPlugin extends Plugin {
                 freeSlots,
                 tasksUntilReset,
                 routeToUpdate,
-                config.rankOffers() ? retainedOffers(held, observedOffers, level) : List.of());
+                config.rankOffers() ? retainedOffers(held, observedOffers, level, tasksUntilReset) : List.of(),
+                travelContext);
         if (planningTask != null) {
             planningTask.cancel(true);
         }
@@ -426,7 +504,8 @@ public class HarbourmasterPlugin extends Plugin {
         PortGraph routeSnapshot = portGraph.detachedSnapshot(request.boatPosition);
         planningTask = plannerExecutor.submit(() -> {
             try {
-                CourierCyclePlanner planner = new CourierCyclePlanner(new RouteOptimizer(routeSnapshot));
+                CourierCyclePlanner planner =
+                        new CourierCyclePlanner(new RouteOptimizer(routeSnapshot, request.travel));
                 CourierPlan plan = request.routeToUpdate == null
                         ? planner.plan(
                                 request.start,
@@ -448,8 +527,11 @@ public class HarbourmasterPlugin extends Plugin {
     }
 
     private List<CourierTask> retainedOffers(
-            List<ActiveTask> held, Map<Port, List<CourierTask>> observedOffers, int level) {
-        if (previousPlanRequest == null || previousCourierPlan == null || previousPlanRequest.sailingLevel != level) {
+            List<ActiveTask> held, Map<Port, List<CourierTask>> observedOffers, int level, int tasksUntilReset) {
+        if (previousPlanRequest == null
+                || previousCourierPlan == null
+                || previousPlanRequest.sailingLevel != level
+                || previousPlanRequest.tasksUntilReset != tasksUntilReset) {
             return List.of();
         }
         for (Map.Entry<Port, List<CourierTask>> board : observedOffers.entrySet()) {
@@ -475,7 +557,7 @@ public class HarbourmasterPlugin extends Plugin {
         }
         portGraph.mergeComputedRoutes(routeSnapshot);
         if (request.routeToUpdate == null) {
-            if (plan.selectedOffers.isEmpty()) {
+            if (request.travel == null && plan.selectedOffers.isEmpty()) {
                 routeTracker.update(request.start, request.boatPosition, request.held);
             }
             previousCourierPlan = plan;
@@ -508,6 +590,7 @@ public class HarbourmasterPlugin extends Plugin {
         private final int tasksUntilReset;
         private final CourierPlan routeToUpdate;
         private final List<CourierTask> retainedOffers;
+        private final TravelContext travel;
 
         private CourierPlanRequest(
                 Port start,
@@ -518,7 +601,8 @@ public class HarbourmasterPlugin extends Plugin {
                 int freeSlots,
                 int tasksUntilReset,
                 CourierPlan routeToUpdate,
-                List<CourierTask> retainedOffers) {
+                List<CourierTask> retainedOffers,
+                TravelContext travel) {
             this.start = start;
             this.boatPosition = boatPosition;
             this.held = held;
@@ -528,6 +612,7 @@ public class HarbourmasterPlugin extends Plugin {
             this.tasksUntilReset = tasksUntilReset;
             this.routeToUpdate = routeToUpdate;
             this.retainedOffers = retainedOffers;
+            this.travel = travel;
         }
     }
 
@@ -551,7 +636,23 @@ public class HarbourmasterPlugin extends Plugin {
     }
 
     public boolean shouldUnloadCargo() {
-        return isGuidanceActive() && cargo.needsUnload(client, snapshot.cargo);
+        return isGuidanceActive()
+                && (travelContext == null || snapshot.dock.hasUnload())
+                && cargo.needsUnload(client, snapshot.cargo);
+    }
+
+    public DockGuidance getDockGuidance() {
+        if (!isGuidanceActive() || client.getLocalPlayer() == null) {
+            return DockGuidance.NONE;
+        }
+        boolean aboard = !client.getLocalPlayer().getWorldView().isTopLevel();
+        return DockGuidance.next(
+                snapshot,
+                aboard,
+                cargo.carryingDelivery(client, snapshot.cargo),
+                shouldCheckNoticeboard(),
+                shouldUnloadCargo(),
+                aboard && ports.isAtSea());
     }
 
     public boolean hasReadNoticeboard(Port port) {

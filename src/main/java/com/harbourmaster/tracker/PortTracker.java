@@ -10,6 +10,7 @@ import net.runelite.api.Client;
 import net.runelite.api.GameObject;
 import net.runelite.api.Player;
 import net.runelite.api.Tile;
+import net.runelite.api.TileObject;
 import net.runelite.api.WorldEntity;
 import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
@@ -19,14 +20,15 @@ import net.runelite.api.gameval.VarbitID;
 
 public final class PortTracker {
     private static final int DOCK_APPROACH_DISTANCE = 5;
-    private final Set<GameObject> objects = new HashSet<>();
+    private final Set<TileObject> objects = new HashSet<>();
     private Port dock;
     private Port associated;
     private Port start;
     private WorldPoint boatPosition;
+    private boolean atSea;
     private BoatSize boatSize = BoatSize.SLOOP;
 
-    public void add(GameObject object) {
+    public void add(TileObject object) {
         if (Port.fromObject(object.getId()) != null
                 || CargoHoldObjects.IDS.contains(object.getId())
                 || object.getId() == ObjectID.SAILING_GANGPLANK_PROXY) {
@@ -34,7 +36,7 @@ public final class PortTracker {
         }
     }
 
-    public void remove(GameObject object) {
+    public void remove(TileObject object) {
         objects.remove(object);
     }
 
@@ -64,6 +66,9 @@ public final class PortTracker {
                     if (tile == null) {
                         continue;
                     }
+                    if (tile.getGroundObject() != null) {
+                        add(tile.getGroundObject());
+                    }
                     for (GameObject object : tile.getGameObjects()) {
                         if (object != null) {
                             add(object);
@@ -76,17 +81,17 @@ public final class PortTracker {
 
     public void update(Client client, Port board) {
         dock = null;
+        atSea = client.getVarbitValue(VarbitID.SAILING_TRANSMIT_IS_AT_SEA) != 0;
         WorldPoint location = position(client);
         updateBoatSize(client, location);
         if (location == null && board == null) {
             return;
         }
-        boolean atSea = client.getVarbitValue(VarbitID.SAILING_TRANSMIT_IS_AT_SEA) != 0;
         boolean aboard = client.getLocalPlayer() != null
                 && !client.getLocalPlayer().getWorldView().isTopLevel();
         boatPosition = aboard && board == null ? position(client, true) : null;
         int closestObject = 25;
-        for (GameObject object : objects) {
+        for (TileObject object : objects) {
             Port port = Port.fromObject(object.getId());
             if (location == null || port == null || !object.getWorldView().isTopLevel()) {
                 continue;
@@ -137,7 +142,7 @@ public final class PortTracker {
         }
         WorldView playerView = player.getWorldView();
         if (!playerView.isTopLevel()) {
-            for (GameObject object : objects) {
+            for (TileObject object : objects) {
                 if (CargoHoldObjects.IDS.contains(object.getId()) && object.getWorldView() == playerView) {
                     boatSize = CargoHoldObjects.boatSizeForObject(object.getId());
                     return;
@@ -149,9 +154,9 @@ public final class PortTracker {
             return;
         }
 
-        GameObject closestBoat = null;
+        TileObject closestBoat = null;
         int closestDistance = 4;
-        for (GameObject object : objects) {
+        for (TileObject object : objects) {
             if (!CargoHoldObjects.IDS.contains(object.getId()) || object.getWorldView() != playerView) {
                 continue;
             }
@@ -194,15 +199,20 @@ public final class PortTracker {
         associated = null;
         start = null;
         boatPosition = null;
+        atSea = false;
         boatSize = BoatSize.SLOOP;
     }
 
-    public List<GameObject> getObjects() {
+    public List<TileObject> getObjects() {
         return List.copyOf(objects);
     }
 
     public Port getDock() {
         return dock;
+    }
+
+    public boolean isAtSea() {
+        return atSea;
     }
 
     public WorldPoint getBoatPosition() {

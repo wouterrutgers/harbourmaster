@@ -6,10 +6,12 @@ import java.util.List;
 public final class DockChecklist {
     public final Port port;
     public final List<RouteEvent> actions;
+    public final boolean claimRewards;
 
-    private DockChecklist(Port port, List<RouteEvent> actions) {
+    private DockChecklist(Port port, List<RouteEvent> actions, boolean claimRewards) {
         this.port = port;
         this.actions = List.copyOf(actions);
+        this.claimRewards = claimRewards;
     }
 
     public static DockChecklist at(Port port, List<ActiveTask> tasks) {
@@ -35,7 +37,11 @@ public final class DockChecklist {
             }
         }
         actions.sort(java.util.Comparator.comparing(event -> event.action == RouteEvent.Action.PICKUP));
-        return new DockChecklist(port, actions);
+        return new DockChecklist(
+                port,
+                actions,
+                tasks.stream().anyMatch(ActiveTask::isFinished)
+                        && actions.stream().noneMatch(event -> event.action == RouteEvent.Action.DELIVER));
     }
 
     public boolean hasUnload() {
@@ -46,7 +52,11 @@ public final class DockChecklist {
         if (!route.available || route.stops.isEmpty()) {
             return this;
         }
-        return new DockChecklist(port, route.stops.get(0).port == port ? route.nextActions() : List.of());
+        return new DockChecklist(port, route.stops.get(0).port == port ? route.nextActions() : List.of(), claimRewards);
+    }
+
+    public DockChecklist withoutActions() {
+        return new DockChecklist(port, List.of(), claimRewards);
     }
 
     public boolean hasAcceptance() {

@@ -3,10 +3,10 @@ package com.harbourmaster.overlay;
 import com.harbourmaster.HarbourmasterConfig;
 import com.harbourmaster.HarbourmasterPlugin;
 import com.harbourmaster.data.CargoHoldObjects;
+import com.harbourmaster.model.DockGuidance;
 import com.harbourmaster.model.HarbourmasterSnapshot;
 import com.harbourmaster.model.Port;
 import com.harbourmaster.model.RouteEvent;
-import com.harbourmaster.tracker.CargoTracker;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Dimension;
@@ -33,7 +33,6 @@ public final class DockOverlay extends Overlay {
     private final Client client;
     private final HarbourmasterPlugin plugin;
     private final HarbourmasterConfig config;
-    private final CargoTracker cargo = new CargoTracker();
 
     @Inject
     public DockOverlay(Client client, HarbourmasterPlugin plugin, HarbourmasterConfig config) {
@@ -50,89 +49,61 @@ public final class DockOverlay extends Overlay {
             return null;
         }
         HarbourmasterSnapshot state = plugin.getSnapshot();
-        boolean checkNoticeboard = plugin.shouldCheckNoticeboard();
-        boolean unloadCargo = plugin.shouldUnloadCargo();
+        DockGuidance guidance = plugin.getDockGuidance();
+        Color color = guidance.unload ? config.unloadColor() : config.loadColor();
         WorldView playerWorld = client.getLocalPlayer().getWorldView();
-        boolean fetchCargo = state.dock.hasUnload()
-                && playerWorld.isTopLevel()
-                && !state.depositCargo
-                && !cargo.carryingDelivery(client, state.cargo);
-        for (GameObject object : plugin.getPorts().getObjects()) {
+        for (TileObject object : plugin.getPorts().getObjects()) {
             Port port = Port.fromObject(object.getId());
-            if (config.highlightGangplank() && state.dock.port != null) {
-                boolean gangplank = object.getId() == ObjectID.SAILING_GANGPLANK_PROXY
-                        || port == state.dock.port && object.getId() == port.gangplankObject;
-                boolean boarding = (state.depositCargo || fetchCargo || state.currentLeg != null && !checkNoticeboard)
-                        && playerWorld.isTopLevel()
-                        && gangplank
+            if (config.highlightGangplank()
+                    && state.dock.port != null
+                    && guidance.target == DockGuidance.Target.GANGPLANK) {
+                boolean shoreGangplank = port == state.dock.port
+                        && object.getId() == port.gangplankObject
                         && object.getWorldView().isTopLevel();
-                boolean leavingBoat = !state.depositCargo
-                        && (unloadCargo || !state.dock.actions.isEmpty() || checkNoticeboard)
+                boolean ownGangplank = object.getId() == ObjectID.SAILING_GANGPLANK_PROXY
                         && !playerWorld.isTopLevel()
-                        && gangplank
-                        && (object.getWorldView().isTopLevel() || object.getWorldView() == playerWorld);
-                if (boarding || leavingBoat) {
-                    drawGangplank(
-                            graphics,
-                            object,
-                            state.depositCargo || !state.dock.hasUnload() ? config.loadColor() : config.unloadColor(),
-                            List.of(
-                                    boarding
-                                            ? state.depositCargo
-                                                    ? "Board to deposit cargo"
-                                                    : fetchCargo ? "Board to fetch crates" : "Board to sail"
-                                            : "Gangplank to " + state.dock.port.name));
+                        && object.getWorldView() == playerWorld;
+                if (shoreGangplank) {
+                    draw(graphics, object, color, List.of(guidance.instruction));
+                }
+                if (ownGangplank) {
+                    drawGangplank(graphics, (GameObject) object, color, List.of(guidance.instruction));
                 }
             }
             if (port != null && object.getId() == port.noticeboardObject && config.highlightNoticeboards()) {
-                if (state.freeSlots > 0 || config.subdueFullBoards()) {
-                    drawNoticeboard(graphics, object, port, state, unloadCargo);
+                if (guidance.target == DockGuidance.Target.NOTICEBOARD && port == state.dock.port
+                        || state.freeSlots == 0 && config.subdueFullBoards()) {
+                    drawNoticeboard(graphics, object, port, state);
                 }
             }
-            if (!state.dock.actions.isEmpty()
-                    && !unloadCargo
-                    && !state.dock.hasAcceptance()
+            if (guidance.target == DockGuidance.Target.LEDGER
                     && port == state.dock.port
                     && object.getId() == port.ledgerObject
                     && config.highlightLedger()) {
                 List<String> lines = new ArrayList<>();
                 lines.add(port.name + " ledger");
                 for (RouteEvent action : state.dock.actions) {
-                    lines.add(action.description());
+                    if ((action.action == RouteEvent.Action.DELIVER) == guidance.unload) {
+                        lines.add(action.description());
+                    }
                 }
-                draw(graphics, object, state.dock.hasUnload() ? config.unloadColor() : config.loadColor(), lines);
+                draw(graphics, object, color, lines);
             }
             if (config.highlightCargoHold()
-                    && (state.depositCargo
-                            || unloadCargo
-                            || !state.dock.actions.isEmpty() && !state.dock.hasAcceptance() && !state.dock.hasUnload())
+                    && guidance.target == DockGuidance.Target.CARGO_HOLD
                     && CargoHoldObjects.IDS.contains(object.getId())
                     && !object.getWorldView().isTopLevel()
                     && object.getWorldView() == playerWorld) {
-                boolean load = state.dock.actions.stream().anyMatch(event -> event.action == RouteEvent.Action.PICKUP);
-                draw(
-                        graphics,
-                        object,
-                        unloadCargo ? config.unloadColor() : config.loadColor(),
-                        List.of(
-                                state.depositCargo
-                                        ? "Deposit task cargo"
-                                        : unloadCargo
-                                                ? (load ? "Unload, then load cargo" : "Unload task cargo")
-                                                : "Load task cargo"));
+                draw(graphics, object, color, List.of(guidance.instruction));
             }
         }
         return null;
     }
 
-    private void drawNoticeboard(
-            Graphics2D graphics, GameObject object, Port port, HarbourmasterSnapshot state, boolean unloadCargo) {
+    private void drawNoticeboard(Graphics2D graphics, TileObject object, Port port, HarbourmasterSnapshot state) {
         String label = state.freeSlots + (state.freeSlots == 1 ? " task slot free" : " task slots free");
         Color color = state.freeSlots > 0 ? config.bestOfferColor() : Color.GRAY;
-        if (state.freeSlots > 0 && unloadCargo && port == state.dock.port) {
-            label = "Unload cargo first";
-            color = Color.GRAY;
-        } else if (state.freeSlots > 0 && config.enableOptimizer() && config.rankOffers()) {
+        if (state.freeSlots > 0 && config.enableOptimizer() && config.rankOffers()) {
             if (!plugin.hasReadNoticeboard(port)) {
                 label = "Check the noticeboard";
             } else if (plugin.isCalculatingPlan()) {
@@ -150,8 +121,11 @@ public final class DockOverlay extends Overlay {
         draw(graphics, object, color, List.of(label));
     }
 
-    private static void draw(Graphics2D graphics, GameObject object, Color color, List<String> lines) {
-        draw(graphics, object, object.getConvexHull(), color, lines);
+    private static void draw(Graphics2D graphics, TileObject object, Color color, List<String> lines) {
+        Shape hull = object instanceof GroundObject
+                ? ((GroundObject) object).getConvexHull()
+                : ((GameObject) object).getConvexHull();
+        draw(graphics, object, hull, color, lines);
     }
 
     private static void drawGangplank(Graphics2D graphics, GameObject proxy, Color color, List<String> lines) {

@@ -8,6 +8,7 @@ import com.harbourmaster.model.RouteEvent;
 import com.harbourmaster.model.RouteLeg;
 import com.harbourmaster.model.RoutePlan;
 import com.harbourmaster.model.RouteStop;
+import com.harbourmaster.model.TravelContext;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -18,9 +19,15 @@ import net.runelite.api.coords.WorldPoint;
 public final class RouteOptimizer {
     private static final double EPSILON = 0.0000001;
     private final PortGraph graph;
+    private final TravelRoutePlanner travelPlanner;
 
     public RouteOptimizer(PortGraph graph) {
+        this(graph, null);
+    }
+
+    public RouteOptimizer(PortGraph graph, TravelContext travel) {
         this.graph = graph;
+        travelPlanner = travel == null ? null : new TravelRoutePlanner(graph, travel);
     }
 
     public RoutePlan optimize(Port start, List<ActiveTask> tasks) {
@@ -72,6 +79,10 @@ public final class RouteOptimizer {
             events.add(new RouteEvent(-1, task, RouteEvent.Action.PICKUP, task.pickup, task.quantity));
             events.add(new RouteEvent(-1, task, RouteEvent.Action.DELIVER, task.delivery, task.quantity));
             taskLengths.add(3);
+        }
+        if (travelPlanner != null) {
+            return travelPlanner.plan(
+                    start, boatPosition, held, events, taskLengths, firstStop, freeSlots, tasksUntilReset);
         }
         return optimize(start, boatPosition, events, taskLengths, firstStop, freeSlots, tasksUntilReset);
     }
@@ -233,7 +244,11 @@ public final class RouteOptimizer {
             legs.add(0, approach);
             distance += approach.distance;
         }
-        return new RoutePlan(true, "", distance, legs, plan.stops);
+        List<RouteStop> stops = new ArrayList<>(plan.stops);
+        if (stops.get(0).arrival != null) {
+            stops.set(0, new RouteStop(destination, stops.get(0).events, approach));
+        }
+        return new RoutePlan(true, "", distance, legs, stops);
     }
 
     private RouteLeg journey(Port start, WorldPoint boatPosition, Port destination) {

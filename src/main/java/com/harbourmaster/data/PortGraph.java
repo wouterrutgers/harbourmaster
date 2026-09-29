@@ -2,8 +2,10 @@ package com.harbourmaster.data;
 
 import com.harbourmaster.model.Port;
 import com.harbourmaster.model.RouteLeg;
+import com.harbourmaster.model.TravelStep;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
@@ -19,6 +21,12 @@ public final class PortGraph {
     private final Map<Port, Optional<RouteLeg>> boatRoutes = new EnumMap<>(Port.class);
     private final Map<PositionRouteKey, Optional<RouteLeg>> preparedBoatRoutes = new HashMap<>();
     private final Map<BoatSize, Map<Integer, Optional<RouteLeg>>> precomputedRoutes = new EnumMap<>(BoatSize.class);
+    private final Map<BoatSize, Map<List<Object>, Optional<RouteLeg>>> precomputedPortalSegments =
+            new EnumMap<>(BoatSize.class);
+    private final Map<List<Object>, Optional<RouteLeg>> portalSegments = new HashMap<>();
+    private final Map<Integer, Optional<RouteLeg>> shortcutRoutes = new HashMap<>();
+    private final Map<Port, RouteLeg> shortcutBoatRoutes = new EnumMap<>(Port.class);
+    private boolean shortcuts;
 
     private BoatSize boatSize = BoatSize.SLOOP;
     private WorldPoint boatPosition;
@@ -43,6 +51,10 @@ public final class PortGraph {
         routes.putAll(precomputedRoutes.getOrDefault(boatSize, Map.of()));
         boatRoutes.clear();
         preparedBoatRoutes.clear();
+        portalSegments.clear();
+        portalSegments.putAll(precomputedPortalSegments.getOrDefault(boatSize, Map.of()));
+        shortcutRoutes.clear();
+        shortcutBoatRoutes.clear();
         missingRoutes = false;
         return true;
     }
@@ -55,14 +67,72 @@ public final class PortGraph {
         missingRoutes = false;
     }
 
-    public void loadPortRoutes(BoatSize boatSize, Map<Integer, Optional<RouteLeg>> routes) {
+    public void loadRoutes(
+            BoatSize boatSize,
+            Map<Integer, Optional<RouteLeg>> routes,
+            Map<List<Object>, Optional<RouteLeg>> portalSegments) {
         precomputedRoutes.put(boatSize, routes);
+        precomputedPortalSegments.put(boatSize, portalSegments);
         if (this.boatSize == boatSize) {
             this.routes.putAll(routes);
+            this.portalSegments.putAll(portalSegments);
+            shortcutRoutes.clear();
         }
     }
 
     public Optional<RouteLeg> routeFromPosition(WorldPoint position, Port destination) {
+        RouteLeg previous = shortcutBoatRoutes.get(destination);
+        Optional<RouteLeg> remaining =
+                shortcuts && previous != null ? remainingShortcut(previous, position) : Optional.empty();
+        // Skip direct searches only when even straight sailing cannot beat the cached journey.
+        if (remaining.isEmpty()
+                || distance(position, destination.navigationLocation) / 4
+                        < remaining.get().travelTicks()) {
+            Optional<RouteLeg> sailing = sailingFromPosition(position, destination);
+            if (sailing.isPresent()
+                    && (remaining.isEmpty()
+                            || sailing.get().travelTicks() < remaining.get().travelTicks())) {
+                remaining = sailing;
+            }
+        }
+        Optional<RouteLeg> route = withShortcuts(null, position, destination, remaining);
+        shortcutBoatRoutes.remove(destination);
+        route.filter(leg -> !leg.sailingOnly()).ifPresent(leg -> shortcutBoatRoutes.put(destination, leg));
+        return route;
+    }
+
+    private static Optional<RouteLeg> remainingShortcut(RouteLeg route, WorldPoint position) {
+        RouteLeg best = null;
+        for (int index = 0; index < route.steps.size(); index++) {
+            TravelStep step = route.steps.get(index);
+            if (step.kind != TravelStep.Kind.SAIL) {
+                continue;
+            }
+            Optional<RouteLeg> remaining = nearbyRemainingRoute(new RouteLeg(null, route.to, 0, step.points), position);
+            if (remaining.isEmpty()) {
+                continue;
+            }
+            List<TravelStep> steps = new ArrayList<>();
+            steps.add(new TravelStep(
+                    TravelStep.Kind.SAIL, step.instruction, remaining.get().distance / 4 + 1, remaining.get().points));
+            steps.addAll(route.steps.subList(index + 1, route.steps.size()));
+            double distance = remaining.get().distance;
+            for (TravelStep next : route.steps.subList(index + 1, route.steps.size())) {
+                if (next.kind == TravelStep.Kind.SAIL) {
+                    for (int point = 1; point < next.points.size(); point++) {
+                        distance += distance(next.points.get(point - 1), next.points.get(point));
+                    }
+                }
+            }
+            RouteLeg candidate = new RouteLeg(null, route.to, distance, List.of(), steps);
+            if (best == null || candidate.travelTicks() < best.travelTicks()) {
+                best = candidate;
+            }
+        }
+        return Optional.ofNullable(best);
+    }
+
+    private Optional<RouteLeg> sailingFromPosition(WorldPoint position, Port destination) {
         if (!position.equals(boatPosition)) {
             WorldPoint previousPosition = boatPosition;
             boatPosition = position;
@@ -108,6 +178,23 @@ public final class PortGraph {
     }
 
     public Optional<RouteLeg> route(Port from, Port to) {
+        Optional<RouteLeg> sailing = sailingRoute(from, to);
+        if (!shortcuts || from == null || to == null || from == to) {
+            return sailing;
+        }
+        int key = routeKey(from, to);
+        Optional<RouteLeg> cached = shortcutRoutes.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        Optional<RouteLeg> route = withShortcuts(from, from.navigationLocation, to, sailing);
+        if (!missingRoutes) {
+            shortcutRoutes.put(key, route);
+        }
+        return route;
+    }
+
+    private Optional<RouteLeg> sailingRoute(Port from, Port to) {
         if (from == null || to == null) {
             return Optional.empty();
         }
@@ -130,6 +217,10 @@ public final class PortGraph {
     public PortGraph detachedSnapshot(WorldPoint position) {
         PortGraph snapshot = new PortGraph(router, boatSize, true);
         snapshot.routes.putAll(routes);
+        snapshot.shortcuts = shortcuts;
+        snapshot.portalSegments.putAll(portalSegments);
+        snapshot.shortcutRoutes.putAll(shortcutRoutes);
+        snapshot.shortcutBoatRoutes.putAll(shortcutBoatRoutes);
         snapshot.preparedBoatRoutes.putAll(preparedBoatRoutes);
         if (position != null) {
             for (Port port : Port.values()) {
@@ -148,12 +239,103 @@ public final class PortGraph {
 
     public void mergeComputedRoutes(PortGraph computed) {
         routes.putAll(computed.routes);
+        portalSegments.keySet().removeIf(key -> (Boolean) key.get(4));
+        portalSegments.putAll(computed.portalSegments);
+        shortcutRoutes.putAll(computed.shortcutRoutes);
+        shortcutBoatRoutes.putAll(computed.shortcutBoatRoutes);
         if (computed.boatPosition != null) {
             for (Map.Entry<Port, Optional<RouteLeg>> entry : computed.boatRoutes.entrySet()) {
                 preparedBoatRoutes.put(new PositionRouteKey(computed.boatPosition, entry.getKey()), entry.getValue());
             }
         }
         missingRoutes = false;
+    }
+
+    public boolean setShortcuts(boolean enabled) {
+        if (shortcuts == enabled) {
+            return false;
+        }
+        shortcuts = enabled;
+        shortcutBoatRoutes.clear();
+        return true;
+    }
+
+    private Optional<RouteLeg> withShortcuts(Port from, WorldPoint position, Port to, Optional<RouteLeg> direct) {
+        if (!shortcuts || to == null) {
+            return direct;
+        }
+        RouteLeg best = direct.orElse(null);
+        for (SailingShortcut shortcut : SailingShortcut.GWENITH) {
+            WorldPoint entry = shortcut.approach(boatSize);
+            WorldPoint exit = shortcut.departure(boatSize);
+            double minimum = (distance(position, entry) + distance(exit, to.navigationLocation)) / 4 + 4;
+            if (best != null && minimum >= best.travelTicks()) {
+                continue;
+            }
+            Optional<RouteLeg> approach = portalSegment(position, entry, -1, shortcut.entryHeading, from == null);
+            Optional<RouteLeg> departure = portalSegment(exit, to.navigationLocation, shortcut.exitHeading, -1, false);
+            if (approach.isEmpty() || departure.isEmpty()) {
+                continue;
+            }
+            double distance = approach.get().distance + departure.get().distance;
+            RouteLeg candidate = new RouteLeg(
+                    from,
+                    to,
+                    distance,
+                    List.of(),
+                    List.of(
+                            new TravelStep(
+                                    TravelStep.Kind.SAIL,
+                                    "Sail to the " + shortcut.name.toLowerCase(java.util.Locale.ROOT),
+                                    approach.get().distance / 4 + 1,
+                                    approach.get().points),
+                            new TravelStep(
+                                    TravelStep.Kind.PORTAL,
+                                    "Enter the " + shortcut.name.toLowerCase(java.util.Locale.ROOT),
+                                    2 + (distance(entry, shortcut.entrance) + distance(shortcut.exit, exit)) / 4,
+                                    List.of(entry, exit)),
+                            new TravelStep(
+                                    TravelStep.Kind.SAIL,
+                                    "Sail to " + to.name,
+                                    departure.get().distance / 4 + 1,
+                                    departure.get().points)));
+            if (best == null || candidate.travelTicks() < best.travelTicks()) {
+                best = candidate;
+            }
+        }
+        return Optional.ofNullable(best);
+    }
+
+    private Optional<RouteLeg> portalSegment(
+            WorldPoint from, WorldPoint to, int departure, int arrival, boolean moving) {
+        List<Object> key = List.of(from, to, departure, arrival, moving);
+        if (portalSegments.containsKey(key)) {
+            return portalSegments.get(key);
+        }
+        if (moving) {
+            Optional<RouteLeg> remaining = portalSegments.entrySet().stream()
+                    .filter(entry -> entry.getKey().get(1).equals(to)
+                            && entry.getKey().get(3).equals(arrival))
+                    .map(Map.Entry::getValue)
+                    .filter(Optional::isPresent)
+                    .map(route -> nearbyRemainingRoute(route.get(), from))
+                    .filter(Optional::isPresent)
+                    .map(Optional::get)
+                    .min(java.util.Comparator.comparingDouble(route -> route.distance));
+            // Keep only the latest moving approach to each portal.
+            portalSegments
+                    .keySet()
+                    .removeIf(cached -> (Boolean) cached.get(4) && cached.get(1).equals(to));
+            if (remaining.isPresent()) {
+                portalSegments.put(key, remaining);
+                return remaining;
+            }
+        }
+        if (background) {
+            return portalSegments.computeIfAbsent(key, ignored -> router.route(from, to, boatSize, departure, arrival));
+        }
+        missingRoutes = true;
+        return Optional.empty();
     }
 
     private Optional<RouteLeg> reusableBoatRoute(WorldPoint position, Port destination) {
@@ -168,14 +350,27 @@ public final class PortGraph {
         if (prepared.isPresent()) {
             return prepared;
         }
+        Optional<RouteLeg> departure = portalSegments.entrySet().stream()
+                .filter(entry -> entry.getKey().get(1).equals(destination.navigationLocation))
+                .map(Map.Entry::getValue)
+                .filter(Optional::isPresent)
+                .map(route -> nearbyRemainingRoute(route.get(), position))
+                .filter(Optional::isPresent)
+                .map(Optional::get)
+                .min(java.util.Comparator.comparingDouble(route -> route.distance));
+        if (departure.isPresent()) {
+            return Optional.of(new RouteLeg(null, destination, departure.get().distance, departure.get().points));
+        }
         return routes.values().stream()
                 .filter(Optional::isPresent)
                 .map(Optional::get)
                 .filter(route -> route.to == destination)
-                .map(route -> remainingRoute(route, position))
+                .map(route -> nearbyRemainingRoute(route, position))
                 .filter(Optional::isPresent)
                 .map(Optional::get)
-                .min(java.util.Comparator.comparingDouble(route -> route.distance));
+                .min(Comparator.comparing(
+                                (RouteLeg route) -> !route.points.get(0).equals(position))
+                        .thenComparingDouble(route -> route.distance));
     }
 
     private void cacheRoute(Port from, Port to, Optional<RouteLeg> route) {

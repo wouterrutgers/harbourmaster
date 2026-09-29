@@ -138,6 +138,24 @@ public final class SailingPathfinder implements SailingRouter {
     }
 
     public SailingSearch search(WorldPoint from, WorldPoint to, BoatSize boatSize) {
+        return search(from, to, boatSize, INITIAL_HEADING, INITIAL_HEADING);
+    }
+
+    @Override
+    public Optional<RouteLeg> route(WorldPoint from, WorldPoint to, BoatSize boatSize, int departure, int arrival) {
+        SailingSearch search = search(
+                from,
+                to,
+                boatSize,
+                departure < 0 ? INITIAL_HEADING : departure,
+                arrival < 0 ? INITIAL_HEADING : arrival);
+        while (!search.advance(Integer.MAX_VALUE)) {
+            // Terrain loads are dispatched to the client thread.
+        }
+        return search.result();
+    }
+
+    private SailingSearch search(WorldPoint from, WorldPoint to, BoatSize boatSize, int departure, int arrival) {
         if (from.getPlane() != 0
                 || to.getPlane() != 0
                 || !insideBounds(from.getX(), from.getY())
@@ -147,7 +165,7 @@ public final class SailingPathfinder implements SailingRouter {
 
         int start = key(from.getX(), from.getY());
         int destination = key(to.getX(), to.getY());
-        return new PathSearch(from, to, boatSize, start, destination);
+        return new PathSearch(from, to, boatSize, start, destination, departure, arrival);
     }
 
     public void prepareDestination(WorldPoint destination, BoatSize boatSize) {
@@ -983,6 +1001,8 @@ public final class SailingPathfinder implements SailingRouter {
         private final BoatSize boatSize;
         private final int destination;
         private final int startState;
+        private final int arrivalHeading;
+        private final boolean constrained;
         private final int terrainRadius;
         private final Map<Integer, Double> distances = new HashMap<>();
         private final Map<Integer, Integer> previous = new HashMap<>();
@@ -992,13 +1012,22 @@ public final class SailingPathfinder implements SailingRouter {
         private int expandedStates;
         private boolean endpointsChecked;
 
-        private PathSearch(WorldPoint from, WorldPoint to, BoatSize boatSize, int start, int destination) {
+        private PathSearch(
+                WorldPoint from,
+                WorldPoint to,
+                BoatSize boatSize,
+                int start,
+                int destination,
+                int departure,
+                int arrival) {
             this.from = from;
             this.to = to;
             this.boatSize = boatSize;
             this.destination = destination;
             terrainRadius = (int) Math.ceil(Math.hypot(boatSize.length / 2.0, boatSize.width / 2.0) + 2);
-            startState = state(start, INITIAL_HEADING);
+            startState = state(start, departure);
+            arrivalHeading = arrival;
+            constrained = departure != INITIAL_HEADING || arrival != INITIAL_HEADING;
             distances.put(startState, 0.0);
             queue.add(new Visit(startState, heuristic(from.getX(), from.getY(), to.getX(), to.getY(), boatSize), 0));
         }
@@ -1023,7 +1052,7 @@ public final class SailingPathfinder implements SailingRouter {
                 }
                 endpointsChecked = true;
                 List<WorldPoint> crossing = crossing(from, to, boatSize);
-                if (!crossing.isEmpty()) {
+                if (!constrained && !crossing.isEmpty()) {
                     result = Optional.of(routeLeg(null, null, crossing));
                     return true;
                 }
@@ -1038,11 +1067,17 @@ public final class SailingPathfinder implements SailingRouter {
                     continue;
                 }
                 int tile = tile(visit.state);
-                if (tile == destination) {
+                if (tile == destination
+                        && (arrivalHeading == INITIAL_HEADING || heading(visit.state) == arrivalHeading)) {
                     List<WorldPoint> points = compressPath(path(startState, visit.state, previous));
                     result = Optional.of(
-                            new RouteRefinement(straightenedRoute(points, boatSize), boatSize, LIVE_REFINEMENT_CHECKS)
-                                    .refine());
+                            constrained
+                                    ? routeLeg(null, null, points)
+                                    : new RouteRefinement(
+                                                    straightenedRoute(points, boatSize),
+                                                    boatSize,
+                                                    LIVE_REFINEMENT_CHECKS)
+                                            .refine());
                     return true;
                 }
 

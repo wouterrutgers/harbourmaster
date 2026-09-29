@@ -6,6 +6,7 @@ import com.google.gson.annotations.SerializedName;
 import com.harbourmaster.data.BoatSize;
 import com.harbourmaster.data.SailingObstacles;
 import com.harbourmaster.data.SailingPathfinder;
+import com.harbourmaster.data.SailingShortcut;
 import com.harbourmaster.model.Port;
 import com.harbourmaster.model.RouteLeg;
 import java.io.IOException;
@@ -55,6 +56,7 @@ public final class RouteDataGenerator {
         }
         String cacheId = arguments.length == 0 || arguments[0].isEmpty() ? null : arguments[0];
         BoatSize boatSize = arguments.length < 2 || arguments[1].isEmpty() ? null : BoatSize.valueOf(arguments[1]);
+        CharterDataGenerator.generate();
         CacheRecord cache = cache(cacheId);
         Path cacheDirectory = download(cache);
         System.out.println("Using Old School live cache " + cache.id + " from " + cache.timestamp);
@@ -156,21 +158,21 @@ public final class RouteDataGenerator {
         SailingObstacles obstacles = new SailingObstacles(obstacleRegions);
         SailingPathfinder.prepareMasks();
         ExecutorService workers = Executors.newFixedThreadPool(selectedBoatSize == null ? BoatSize.values().length : 1);
-        Map<BoatSize, Future<List<RouteEntry>>> generated = new EnumMap<>(BoatSize.class);
+        Map<BoatSize, Future<RouteFile>> generated = new EnumMap<>(BoatSize.class);
         try {
             for (BoatSize boatSize : BoatSize.values()) {
                 if (selectedBoatSize != null && selectedBoatSize != boatSize) {
                     continue;
                 }
-                generated.put(boatSize, workers.submit(() -> generate(terrain, obstacles, boatSize)));
+                generated.put(boatSize, workers.submit(() -> generate(terrain, obstacles, boatSize, cacheId)));
             }
-            Map<BoatSize, List<RouteEntry>> completed = new EnumMap<>(BoatSize.class);
-            for (Map.Entry<BoatSize, Future<List<RouteEntry>>> entry : generated.entrySet()) {
+            Map<BoatSize, RouteFile> completed = new EnumMap<>(BoatSize.class);
+            for (Map.Entry<BoatSize, Future<RouteFile>> entry : generated.entrySet()) {
                 completed.put(entry.getKey(), entry.getValue().get());
             }
             SailingObstacleGenerator.write(obstacleRegions);
-            for (Map.Entry<BoatSize, List<RouteEntry>> entry : completed.entrySet()) {
-                write(entry.getKey(), cacheId, entry.getValue());
+            for (Map.Entry<BoatSize, RouteFile> entry : completed.entrySet()) {
+                write(entry.getKey(), entry.getValue());
             }
         } finally {
             workers.shutdownNow();
@@ -179,7 +181,8 @@ public final class RouteDataGenerator {
                 "Generated sailing routes in %.1f minutes%n", (System.nanoTime() - startedAt) / 60_000_000_000.0);
     }
 
-    private static List<RouteEntry> generate(IndexDataBase terrain, SailingObstacles obstacles, BoatSize boatSize) {
+    private static RouteFile generate(
+            IndexDataBase terrain, SailingObstacles obstacles, BoatSize boatSize, long cacheId) {
         SailingPathfinder pathfinder = new SailingPathfinder(terrain, 1, obstacles);
         List<RouteEntry> routes = new ArrayList<>();
         for (int toIndex = 1; toIndex < Port.values().length; toIndex++) {
@@ -207,6 +210,39 @@ public final class RouteDataGenerator {
         routes.sort(Comparator.comparingInt(
                         (RouteEntry route) -> Port.valueOf(route.from).ordinal())
                 .thenComparingInt(route -> Port.valueOf(route.to).ordinal()));
+        RouteFile file = new RouteFile();
+        file.formatVersion = 2;
+        file.cacheId = cacheId;
+        file.boatSize = boatSize.name();
+        file.routes = routes;
+        file.portalRoutes = generatePortals(pathfinder, boatSize);
+        return file;
+    }
+
+    private static List<PortalEntry> generatePortals(SailingPathfinder pathfinder, BoatSize boatSize) {
+        List<PortalEntry> routes = new ArrayList<>();
+        for (SailingShortcut shortcut : SailingShortcut.GWENITH) {
+            WorldPoint entrance = shortcut.approach(boatSize);
+            pathfinder.prepareDestination(entrance, boatSize);
+            for (Port port : Port.values()) {
+                RouteLeg route = pathfinder
+                        .route(port.navigationLocation, entrance, boatSize, -1, shortcut.entryHeading)
+                        .orElse(null);
+                routes.add(new PortalEntry(port.navigationLocation, entrance, -1, shortcut.entryHeading, route));
+                System.out.printf("%s: %s to %s, %s%n", boatSize, port.name, shortcut.name, route != null);
+            }
+        }
+        for (Port port : Port.values()) {
+            pathfinder.prepareDestination(port.navigationLocation, boatSize);
+            for (SailingShortcut shortcut : SailingShortcut.GWENITH) {
+                WorldPoint exit = shortcut.departure(boatSize);
+                RouteLeg route = pathfinder
+                        .route(exit, port.navigationLocation, boatSize, shortcut.exitHeading, -1)
+                        .orElse(null);
+                routes.add(new PortalEntry(exit, port.navigationLocation, shortcut.exitHeading, -1, route));
+                System.out.printf("%s: %s to %s, %s%n", boatSize, shortcut.name, port.name, route != null);
+            }
+        }
         return routes;
     }
 
@@ -239,12 +275,7 @@ public final class RouteDataGenerator {
         }
     }
 
-    private static void write(BoatSize boatSize, long cacheId, List<RouteEntry> routes) throws IOException {
-        RouteFile file = new RouteFile();
-        file.formatVersion = 1;
-        file.cacheId = cacheId;
-        file.boatSize = boatSize.name();
-        file.routes = routes;
+    private static void write(BoatSize boatSize, RouteFile file) throws IOException {
         Path output = Path.of(
                 "src",
                 "main",
@@ -286,6 +317,29 @@ public final class RouteDataGenerator {
         private long cacheId;
         private String boatSize;
         private List<RouteEntry> routes;
+        private List<PortalEntry> portalRoutes;
+    }
+
+    private static final class PortalEntry {
+        private final int[] from;
+        private final int[] to;
+        private final int departure;
+        private final int arrival;
+        private final Double distance;
+        private final int[][] points;
+
+        private PortalEntry(WorldPoint from, WorldPoint to, int departure, int arrival, RouteLeg route) {
+            this.from = new int[] {from.getX(), from.getY()};
+            this.to = new int[] {to.getX(), to.getY()};
+            this.departure = departure;
+            this.arrival = arrival;
+            distance = route == null ? null : route.distance;
+            points = route == null
+                    ? new int[0][]
+                    : route.points.stream()
+                            .map(point -> new int[] {point.getX(), point.getY()})
+                            .toArray(int[][]::new);
+        }
     }
 
     private static final class RouteEntry {

@@ -8,6 +8,7 @@ import com.harbourmaster.HarbourmasterConfig;
 import com.harbourmaster.HarbourmasterPlugin;
 import com.harbourmaster.model.ActiveTask;
 import com.harbourmaster.model.DockChecklist;
+import com.harbourmaster.model.DockGuidance;
 import com.harbourmaster.model.HarbourmasterSnapshot;
 import com.harbourmaster.model.Port;
 import com.harbourmaster.model.RoutePlan;
@@ -27,8 +28,11 @@ import net.runelite.api.ItemContainer;
 import net.runelite.api.Player;
 import net.runelite.api.Scene;
 import net.runelite.api.Tile;
+import net.runelite.api.TileObject;
 import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
+import net.runelite.api.events.GroundObjectDespawned;
+import net.runelite.api.events.GroundObjectSpawned;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.gameval.ObjectID;
 import org.junit.Test;
@@ -84,6 +88,17 @@ public class DockOverlayTest {
         }
 
         @Override
+        public DockGuidance getDockGuidance() {
+            return DockGuidance.next(
+                    getSnapshot(),
+                    !playerWorld.isTopLevel(),
+                    cargo.carryingDelivery(client, cargo.destinations(tasks, dock)),
+                    checkNoticeboard,
+                    shouldUnloadCargo(),
+                    false);
+        }
+
+        @Override
         public HarbourmasterSnapshot getSnapshot() {
             Map<Integer, CargoTracker.Destination> destinations = cargo.destinations(tasks, dock);
             return new HarbourmasterSnapshot(
@@ -116,6 +131,25 @@ public class DockOverlayTest {
     }
 
     @Test
+    public void boardingAtPiscariliusHighlightsTheShoreGroundObjectUntilItDespawns() {
+        dock = Port.PORT_PISCARILIUS;
+        playerWorld = world(true, 1);
+        carried = new Item(tasks.get(0).definition.itemId, 1);
+        GroundObject gangplank = (GroundObject) object(playerWorld, dock.gangplankObject, 10);
+        GroundObjectSpawned spawned = new GroundObjectSpawned();
+        spawned.setGroundObject(gangplank);
+        plugin.onGroundObjectSpawned(spawned);
+
+        assertEquals(DockGuidance.BOARD_TO_DEPOSIT, plugin.getDockGuidance());
+        assertNotEquals(0, render().getRGB(20, 20));
+
+        GroundObjectDespawned despawned = new GroundObjectDespawned();
+        despawned.setGroundObject(gangplank);
+        plugin.onGroundObjectDespawned(despawned);
+        assertEquals(0, render().getRGB(20, 20));
+    }
+
+    @Test
     public void gangplankFollowsBoardingAndDockActionsWithoutMarkingOtherBoats() {
         WorldView shore = world(true);
         plugin.getPorts().add(object(shore, A.gangplankObject, 10));
@@ -132,7 +166,10 @@ public class DockOverlayTest {
         plugin.getPorts().add(object(boat(), ObjectID.SAILING_GANGPLANK_PROXY, 70));
         assertEquals(0, render().getRGB(20, 20));
 
+        carried = null;
         dock = B;
+        assertEquals(0, render().getRGB(20, 20));
+        carried = new Item(tasks.get(0).definition.itemId, 1);
         assertNotEquals(0, render().getRGB(20, 20));
         assertEquals(0, render().getRGB(80, 20));
         dock = null;
@@ -145,7 +182,7 @@ public class DockOverlayTest {
         WorldView shore = world(true);
         plugin.getPorts().add(object(shore, B.gangplankObject, 10));
         plugin.getPorts().add(object(shore, A.gangplankObject, 70));
-        assertNotEquals(0, render().getRGB(20, 20));
+        assertEquals(0, render().getRGB(20, 20));
         assertEquals(0, render().getRGB(80, 20));
 
         carried = new Item(tasks.get(0).definition.itemId, 1);
@@ -158,12 +195,13 @@ public class DockOverlayTest {
         dock = B;
         playerWorld = world(true);
         plugin.getPorts().add(object(playerWorld, B.gangplankObject, 10));
-        plugin.getPorts().add(object(playerWorld, A.gangplankObject, 70));
+        plugin.getPorts().add(object(playerWorld, B.ledgerObject, 70));
         assertNotEquals(0, render().getRGB(20, 20));
         assertEquals(0, render().getRGB(80, 20));
 
         carried = new Item(tasks.get(0).definition.itemId, 1);
         assertEquals(0, render().getRGB(20, 20));
+        assertNotEquals(0, render().getRGB(80, 20));
     }
 
     @Test
@@ -184,6 +222,7 @@ public class DockOverlayTest {
         playerWorld = world(true);
         plugin.getPorts().add(object(playerWorld, A.noticeboardObject, 10));
         route = new RouteOptimizer(line()).optimize(A, tasks);
+        checkNoticeboard = true;
 
         assertNotEquals(0, render().getRGB(20, 20));
     }
@@ -255,13 +294,13 @@ public class DockOverlayTest {
         });
     }
 
-    private static GameObject hold(WorldView boat, int horizontalPosition) {
+    private static TileObject hold(WorldView boat, int horizontalPosition) {
         return object(boat, ObjectID.SAILING_BOAT_CARGO_HOLD_REGULAR_RAFT, horizontalPosition);
     }
 
-    private static GameObject object(WorldView world, int identifier, int horizontalPosition) {
-        boolean gangplank = identifier == ObjectID.SAILING_GANGPLANK_PROXY
-                || Port.fromObject(identifier) != null && Port.fromObject(identifier).gangplankObject == identifier;
+    private static TileObject object(WorldView world, int identifier, int horizontalPosition) {
+        boolean shoreGangplank =
+                Port.fromObject(identifier) != null && Port.fromObject(identifier).gangplankObject == identifier;
         GroundObject ground = ApiStub.of(GroundObject.class, (method, arguments) -> {
             switch (method) {
                 case "getConvexHull":
@@ -278,7 +317,8 @@ public class DockOverlayTest {
             }
             throw new AssertionError(method);
         });
-        return ApiStub.of(GameObject.class, (method, arguments) -> {
+        Class<? extends TileObject> type = shoreGangplank ? GroundObject.class : GameObject.class;
+        return ApiStub.of(type, (method, arguments) -> {
             switch (method) {
                 case "getId":
                     return identifier;
@@ -289,7 +329,9 @@ public class DockOverlayTest {
                 case "getLocalLocation":
                     return new LocalPoint(horizontalPosition / 60 * 128 + 64, 64, 0);
                 case "getConvexHull":
-                    return gangplank ? null : new Rectangle(horizontalPosition, 10, 20, 20);
+                    return identifier == ObjectID.SAILING_GANGPLANK_PROXY
+                            ? null
+                            : new Rectangle(horizontalPosition, 10, 20, 20);
                 case "getCanvasTextLocation":
                     return null;
                 default:
