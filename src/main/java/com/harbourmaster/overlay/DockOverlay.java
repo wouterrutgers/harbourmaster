@@ -52,7 +52,7 @@ public final class DockOverlay extends Overlay {
         DockGuidance guidance = plugin.getDockGuidance();
         Color color = guidance.unload ? config.unloadColor() : config.loadColor();
         WorldView playerWorld = client.getLocalPlayer().getWorldView();
-        for (GameObject object : plugin.getPorts().getObjects()) {
+        for (TileObject object : plugin.getPorts().getObjects()) {
             Port port = Port.fromObject(object.getId());
             if (config.highlightGangplank()
                     && state.dock.port != null
@@ -63,8 +63,11 @@ public final class DockOverlay extends Overlay {
                 boolean ownGangplank = object.getId() == ObjectID.SAILING_GANGPLANK_PROXY
                         && !playerWorld.isTopLevel()
                         && object.getWorldView() == playerWorld;
-                if (shoreGangplank || ownGangplank) {
-                    drawGangplank(graphics, object, color, List.of(guidance.instruction));
+                if (shoreGangplank) {
+                    draw(graphics, object, color, List.of(guidance.instruction));
+                }
+                if (ownGangplank) {
+                    drawGangplank(graphics, (GameObject) object, color, List.of(guidance.instruction));
                 }
             }
             if (port != null && object.getId() == port.noticeboardObject && config.highlightNoticeboards()) {
@@ -97,7 +100,7 @@ public final class DockOverlay extends Overlay {
         return null;
     }
 
-    private void drawNoticeboard(Graphics2D graphics, GameObject object, Port port, HarbourmasterSnapshot state) {
+    private void drawNoticeboard(Graphics2D graphics, TileObject object, Port port, HarbourmasterSnapshot state) {
         String label = state.freeSlots + (state.freeSlots == 1 ? " task slot free" : " task slots free");
         Color color = state.freeSlots > 0 ? config.bestOfferColor() : Color.GRAY;
         if (state.freeSlots > 0 && config.enableOptimizer() && config.rankOffers()) {
@@ -118,8 +121,11 @@ public final class DockOverlay extends Overlay {
         draw(graphics, object, color, List.of(label));
     }
 
-    private static void draw(Graphics2D graphics, GameObject object, Color color, List<String> lines) {
-        draw(graphics, object, object.getConvexHull(), color, lines);
+    private static void draw(Graphics2D graphics, TileObject object, Color color, List<String> lines) {
+        Shape hull = object instanceof GroundObject
+                ? ((GroundObject) object).getConvexHull()
+                : ((GameObject) object).getConvexHull();
+        draw(graphics, object, hull, color, lines);
     }
 
     private static void drawGangplank(Graphics2D graphics, GameObject proxy, Color color, List<String> lines) {

@@ -56,6 +56,9 @@ public enum DockGuidance {
         if (state.dock.port == null || atSea && state.dock.port != state.nextPort()) {
             return NONE;
         }
+        if (carryingDelivery) {
+            return aboard ? LEAVE_TO_DELIVER : DELIVER;
+        }
         if (unloadCargo) {
             return TAKE_DELIVERY_CARGO;
         }
@@ -66,9 +69,6 @@ public enum DockGuidance {
             return aboard ? LEAVE_TO_CHECK_BOARD : CHECK_BOARD;
         }
         if (state.dock.hasUnload()) {
-            if (carryingDelivery) {
-                return aboard ? LEAVE_TO_DELIVER : DELIVER;
-            }
             return aboard ? TAKE_DELIVERY_CARGO : BOARD_TO_FETCH;
         }
         if (state.dock.actions.stream().anyMatch(event -> event.action == RouteEvent.Action.PICKUP)) {

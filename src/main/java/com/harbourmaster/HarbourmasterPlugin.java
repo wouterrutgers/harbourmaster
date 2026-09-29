@@ -51,6 +51,8 @@ import net.runelite.api.events.GameObjectDespawned;
 import net.runelite.api.events.GameObjectSpawned;
 import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
+import net.runelite.api.events.GroundObjectDespawned;
+import net.runelite.api.events.GroundObjectSpawned;
 import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.events.WorldViewUnloaded;
 import net.runelite.api.gameval.InterfaceID;
@@ -217,6 +219,16 @@ public class HarbourmasterPlugin extends Plugin {
     }
 
     @Subscribe
+    public void onGroundObjectSpawned(GroundObjectSpawned event) {
+        ports.add(event.getGroundObject());
+    }
+
+    @Subscribe
+    public void onGroundObjectDespawned(GroundObjectDespawned event) {
+        ports.remove(event.getGroundObject());
+    }
+
+    @Subscribe
     public void onWorldViewUnloaded(WorldViewUnloaded event) {
         ports.unload(event.getWorldView());
     }
@@ -279,8 +291,17 @@ public class HarbourmasterPlugin extends Plugin {
                 client::getVarbitValue, client::getVarpValue, catalog::byId, catalog::isIgnoredTask, ports.getStart());
         TravelContext availableTravel =
                 config.useTeleports() ? travelTracker.read(client, held, config, ports.getDock()) : null;
+        boolean leavingDock = travelContext != null
+                && availableTravel != null
+                && travelContext.boat == availableTravel.boat
+                && travelContext.boatPort != null
+                && availableTravel.boatPort == null
+                && availableTravel.aboard
+                && snapshot.sailingNext();
         if (!java.util.Objects.equals(travelContext, availableTravel)) {
-            clearPlan();
+            if (!leavingDock) {
+                clearPlan();
+            }
             travelContext = availableTravel;
         }
         BoatSize routeBoatSize =
@@ -340,7 +361,8 @@ public class HarbourmasterPlugin extends Plugin {
         RoutePlan route;
         CourierPlan courierPlan;
         if (config.enableOptimizer()) {
-            courierPlan = updatePlan(held, observedOffers, level, freeSlots, offerCycles.tasksUntilReset());
+            courierPlan =
+                    updatePlan(held, observedOffers, level, freeSlots, offerCycles.tasksUntilReset(), leavingDock);
             route = courierPlan == null ? RoutePlan.empty() : courierPlan.route;
         } else {
             clearPlan();
@@ -363,7 +385,8 @@ public class HarbourmasterPlugin extends Plugin {
             Map<Port, List<CourierTask>> observedOffers,
             int level,
             int freeSlots,
-            int tasksUntilReset) {
+            int tasksUntilReset,
+            boolean leavingDock) {
         List<Object> inputs = Arrays.asList(
                 held,
                 observedOffers,
@@ -372,14 +395,17 @@ public class HarbourmasterPlugin extends Plugin {
                 planStart,
                 ports.getBoatSize(),
                 config.rankOffers(),
-                tasksUntilReset,
-                travelContext);
+                tasksUntilReset);
         if (!inputs.equals(previousPlanInputs)
+                || leavingDock
                 || pendingPlanRequest != null
                         && pendingPlanRequest.boatPosition != null
                         && ports.getBoatPosition() == null) {
+            CourierPlan routeToUpdate = leavingDock && pendingPlanRequest == null && inputs.equals(previousPlanInputs)
+                    ? previousCourierPlan
+                    : null;
             previousPlanInputs = inputs;
-            requestPlan(held, observedOffers, level, freeSlots, tasksUntilReset, null);
+            requestPlan(held, observedOffers, level, freeSlots, tasksUntilReset, routeToUpdate);
         }
         if (previousCourierPlan == null || pendingPlanRequest != null) {
             return previousPlanRequest != null

@@ -5,6 +5,7 @@ import com.harbourmaster.model.RouteLeg;
 import com.harbourmaster.model.TravelStep;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
@@ -364,10 +365,12 @@ public final class PortGraph {
                 .filter(Optional::isPresent)
                 .map(Optional::get)
                 .filter(route -> route.to == destination)
-                .map(route -> remainingRoute(route, position))
+                .map(route -> nearbyRemainingRoute(route, position))
                 .filter(Optional::isPresent)
                 .map(Optional::get)
-                .min(java.util.Comparator.comparingDouble(route -> route.distance));
+                .min(Comparator.comparing(
+                                (RouteLeg route) -> !route.points.get(0).equals(position))
+                        .thenComparingDouble(route -> route.distance));
     }
 
     private void cacheRoute(Port from, Port to, Optional<RouteLeg> route) {

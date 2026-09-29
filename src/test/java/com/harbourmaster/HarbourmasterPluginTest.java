@@ -72,6 +72,7 @@ public class HarbourmasterPluginTest {
     private Item carried;
     private WorldPoint stalledPosition;
     private final CountDownLatch searchStarted = new CountDownLatch(1);
+    private final CountDownLatch searchReleased = new CountDownLatch(1);
     private final CountDownLatch searchCancelled = new CountDownLatch(1);
     private int routeSearches;
     private final Widget boardEntry = ApiStub.of(Widget.class, (method, arguments) -> {
@@ -209,8 +210,7 @@ public class HarbourmasterPluginTest {
             if (from.equals(stalledPosition)) {
                 searchStarted.countDown();
                 try {
-                    new CountDownLatch(1).await();
-                    throw new AssertionError("Obsolete search must be cancelled");
+                    searchReleased.await();
                 } catch (InterruptedException exception) {
                     Thread.currentThread().interrupt();
                     searchCancelled.countDown();
@@ -378,6 +378,47 @@ public class HarbourmasterPluginTest {
         publishPlan();
         assertEquals(location, plugin.getSnapshot().route.legs.get(0).points.get(0));
         assertEquals(List.of(task), plugin.getSnapshot().courierPlan.selectedOffers);
+    }
+
+    @Test
+    public void leavingTheDockKeepsSailingGuidanceWhileTravelOptionsAreRecalculated()
+            throws ReflectiveOperationException, InterruptedException {
+        useTeleports = true;
+        aboard = true;
+        dock();
+        varbits.put(VarbitID.SAILING_LAST_PERSONAL_BOAT_BOARDED, 1);
+        varbits.put(VarbitID.SAILING_BOAT_1_OWNED, 1);
+        varbits.put(VarbitID.SAILING_BOAT_1_PORT, B.ordinal());
+        varbits.put(TaskVarbits.IDS[0], task.id);
+        varbits.put(TaskVarbits.TAKEN[0], task.quantity);
+        CourierTask offer = new CourierTask(2, 2, "Next offer", 1, D, 102, "Cargo", 1, 10000, D, E);
+        ((OfferCycleTracker) field(plugin, "offerCycles").get(plugin)).observe(0, D, List.of(offer));
+        plugin.onGameTick(new GameTick());
+        publishPlan();
+        assertEquals(List.of(offer), plugin.getSnapshot().courierPlan.selectedOffers);
+        assertEquals(D, plugin.getSnapshot().nextPort());
+
+        varbits.put(VarbitID.SAILING_TRANSMIT_IS_AT_SEA, 1);
+        location = new WorldPoint(B.navigationLocation.getX() + 15, B.navigationLocation.getY(), 0);
+        stalledPosition = location;
+        plugin.onGameTick(new GameTick());
+        assertTrue(searchStarted.await(5, TimeUnit.SECONDS));
+
+        location = new WorldPoint(location.getX() + 4, location.getY(), 0);
+        plugin.onGameTick(new GameTick());
+        assertTrue(plugin.isCalculatingPlan());
+        assertTrue(plugin.getSnapshot().sailingNext());
+        assertFalse(plugin.getSnapshot().navigation.isEmpty());
+        assertEquals(D, plugin.getSnapshot().nextPort());
+        assertEquals(List.of(offer), plugin.getSnapshot().courierPlan.selectedOffers);
+
+        searchReleased.countDown();
+        publishPlan();
+        publishPlan();
+        assertFalse(plugin.isCalculatingPlan());
+        assertEquals(D, plugin.getSnapshot().nextPort());
+        assertEquals(location, plugin.getSnapshot().currentLeg.points.get(0));
+        assertEquals(List.of(offer), plugin.getSnapshot().courierPlan.selectedOffers);
     }
 
     @Test
@@ -601,12 +642,37 @@ public class HarbourmasterPluginTest {
         carried = new Item(delivery.itemId, 1);
         plugin.onGameTick(new GameTick());
         assertFalse(plugin.shouldUnloadCargo());
+        assertEquals(DockGuidance.LEAVE_TO_DELIVER, plugin.getDockGuidance());
+
+        aboard = false;
+        plugin.onGameTick(new GameTick());
+        assertEquals(DockGuidance.DELIVER, plugin.getDockGuidance());
 
         carried = null;
-        aboard = false;
         plugin.onGameTick(new GameTick());
         assertFalse(plugin.shouldUnloadCargo());
         assertTrue(plugin.getSnapshot().dock.hasAcceptance());
+        assertEquals(DockGuidance.CHECK_BOARD, plugin.getDockGuidance());
+    }
+
+    @Test
+    public void completedTasksDoNotInterruptFetchingTheRemainingDeliveryCrates()
+            throws ReflectiveOperationException, InterruptedException {
+        CourierTask first = courier(2, A, B, 1000);
+        CourierTask remaining = courier(3, A, B, 1000);
+        PortTaskCatalog catalog = (PortTaskCatalog) field(plugin, "catalog").get(plugin);
+        field(catalog, "byId").set(catalog, Map.of(first.id, first, remaining.id, remaining));
+        dock();
+        varbits.put(VarbitID.PORT_TASK_EXTRA_SLOTS_UNLOCKED, 1);
+        varbits.put(TaskVarbits.IDS[0], first.id);
+        varbits.put(TaskVarbits.TAKEN[0], first.quantity);
+        varbits.put(TaskVarbits.DELIVERED[0], first.quantity);
+        varbits.put(TaskVarbits.IDS[1], remaining.id);
+        varbits.put(TaskVarbits.TAKEN[1], remaining.quantity);
+        plugin.onGameTick(new GameTick());
+        publishPlan();
+
+        assertEquals(DockGuidance.BOARD_TO_FETCH, plugin.getDockGuidance());
     }
 
     @Test

@@ -372,6 +372,13 @@ public class PortGraphTest {
         graph.route(Port.PORT_SARIM, Port.MUSA_POINT);
 
         WorldPoint position = new WorldPoint(destination.getX() - 5, destination.getY(), 0);
+        WorldPoint nearby = new WorldPoint(position.getX(), position.getY() + 2, 0);
+        RouteLeg reused = graph.detachedSnapshot(nearby)
+                .routeFromPosition(nearby, Port.MUSA_POINT)
+                .orElseThrow(AssertionError::new);
+        assertEquals(1, searches[0]);
+        assertEquals(List.of(position, destination), reused.points);
+
         RouteLeg remaining = graph.routeFromPosition(position, Port.MUSA_POINT).orElseThrow(AssertionError::new);
 
         assertEquals(1, searches[0]);

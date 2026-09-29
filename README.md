@@ -9,7 +9,7 @@ Harbourmaster is a RuneLite plugin that helps you earn Sailing XP from courier t
 3. Sail along the route to your next port. Cargo labels show where each crate belongs and highlight what to unload.
 
 Check noticeboards as you visit ports so the plugin can include new offers in your plan.
-If a delivered task still occupies a slot, follow the prompt to claim rewards from the port master.
+Finish collecting and delivering the crates for the current port. Rewards are normally paid when you finish unloading. If a completed task still occupies a slot afterward, follow the prompt to claim its rewards from the port master.
 
 For faster courier cycles, combine tasks sharing a sailing route and enable the travel methods you use. Return tasks, empty boat summons and Gwenith shortcuts can save substantial travel.
 

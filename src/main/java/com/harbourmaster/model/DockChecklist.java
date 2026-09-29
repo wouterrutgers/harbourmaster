@@ -37,7 +37,11 @@ public final class DockChecklist {
             }
         }
         actions.sort(java.util.Comparator.comparing(event -> event.action == RouteEvent.Action.PICKUP));
-        return new DockChecklist(port, actions, tasks.stream().anyMatch(ActiveTask::isFinished));
+        return new DockChecklist(
+                port,
+                actions,
+                tasks.stream().anyMatch(ActiveTask::isFinished)
+                        && actions.stream().noneMatch(event -> event.action == RouteEvent.Action.DELIVER));
     }
 
     public boolean hasUnload() {
