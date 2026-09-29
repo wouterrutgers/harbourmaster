@@ -374,8 +374,8 @@ public interface HarbourmasterConfig extends Config {
 
     @ConfigItem(
             keyName = "showDockChecklist",
-            name = "Show dock checklist",
-            description = "Group all available loads and unloads at the current port.",
+            name = "Show dock guidance",
+            description = "Show the next dock, cargo or reward action.",
             section = dock,
             position = 4)
     default boolean showDockChecklist() {

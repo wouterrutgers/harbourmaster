@@ -10,6 +10,7 @@ import com.harbourmaster.model.ActiveTask;
 import com.harbourmaster.model.CourierPlan;
 import com.harbourmaster.model.CourierTask;
 import com.harbourmaster.model.DockChecklist;
+import com.harbourmaster.model.DockGuidance;
 import com.harbourmaster.model.HarbourmasterSnapshot;
 import com.harbourmaster.model.Port;
 import com.harbourmaster.model.RoutePlan;
@@ -294,7 +295,7 @@ public class HarbourmasterPlugin extends Plugin {
             previousInputs = null;
         }
         guidanceActive = guidanceActivity.update(
-                        held.stream().anyMatch(task -> !task.isFinished()),
+                        !held.isEmpty(),
                         noticeboard.isOpen() || noticeboard.isDetailsOpen() || noticeboard.isOpeningDetails(),
                         clock.instant())
                 && (travelContext != null
@@ -302,7 +303,10 @@ public class HarbourmasterPlugin extends Plugin {
                         || client.getLocalPlayer() != null
                                 && !client.getLocalPlayer().getWorldView().isTopLevel());
         int completedTasks = client.getVarbitValue(VarbitID.PORT_TASKS_COMPLETED_TODAY);
-        offerCycles.observe(completedTasks, noticeboard.isOpen() ? noticeboard.getOffers() : List.of());
+        offerCycles.observe(
+                completedTasks,
+                noticeboard.isOpen() ? ports.getStart() : null,
+                noticeboard.isOpen() ? noticeboard.getOffers() : List.of());
         if (noticeboard.isDetailsOpen() || noticeboard.isOpeningDetails()) {
             return;
         }
@@ -378,7 +382,11 @@ public class HarbourmasterPlugin extends Plugin {
             requestPlan(held, observedOffers, level, freeSlots, tasksUntilReset, null);
         }
         if (previousCourierPlan == null || pendingPlanRequest != null) {
-            return previousCourierPlan;
+            return previousPlanRequest != null
+                            && previousPlanRequest.held.equals(held)
+                            && previousPlanRequest.tasksUntilReset == tasksUntilReset
+                    ? previousCourierPlan
+                    : null;
         }
 
         if (!previousCourierPlan.available) {
@@ -461,7 +469,7 @@ public class HarbourmasterPlugin extends Plugin {
                 freeSlots,
                 tasksUntilReset,
                 routeToUpdate,
-                config.rankOffers() ? retainedOffers(held, observedOffers, level) : List.of(),
+                config.rankOffers() ? retainedOffers(held, observedOffers, level, tasksUntilReset) : List.of(),
                 travelContext);
         if (planningTask != null) {
             planningTask.cancel(true);
@@ -493,8 +501,11 @@ public class HarbourmasterPlugin extends Plugin {
     }
 
     private List<CourierTask> retainedOffers(
-            List<ActiveTask> held, Map<Port, List<CourierTask>> observedOffers, int level) {
-        if (previousPlanRequest == null || previousCourierPlan == null || previousPlanRequest.sailingLevel != level) {
+            List<ActiveTask> held, Map<Port, List<CourierTask>> observedOffers, int level, int tasksUntilReset) {
+        if (previousPlanRequest == null
+                || previousCourierPlan == null
+                || previousPlanRequest.sailingLevel != level
+                || previousPlanRequest.tasksUntilReset != tasksUntilReset) {
             return List.of();
         }
         for (Map.Entry<Port, List<CourierTask>> board : observedOffers.entrySet()) {
@@ -602,6 +613,20 @@ public class HarbourmasterPlugin extends Plugin {
         return isGuidanceActive()
                 && (travelContext == null || snapshot.dock.hasUnload())
                 && cargo.needsUnload(client, snapshot.cargo);
+    }
+
+    public DockGuidance getDockGuidance() {
+        if (!isGuidanceActive() || client.getLocalPlayer() == null) {
+            return DockGuidance.NONE;
+        }
+        boolean aboard = !client.getLocalPlayer().getWorldView().isTopLevel();
+        return DockGuidance.next(
+                snapshot,
+                aboard,
+                cargo.carryingDelivery(client, snapshot.cargo),
+                shouldCheckNoticeboard(),
+                shouldUnloadCargo(),
+                aboard && ports.isAtSea());
     }
 
     public boolean hasReadNoticeboard(Port port) {

@@ -16,15 +16,15 @@ public final class OfferCycleTracker {
     private int previousCompletedTasks = -1;
     private long resetDay = Long.MIN_VALUE;
 
-    public void observe(int completedTasks, List<CourierTask> offers) {
-        observe(completedTasks, offers, resetDay(Instant.now()));
+    public void observe(int completedTasks, Port port, List<CourierTask> offers) {
+        observe(completedTasks, port, offers, resetDay(Instant.now()));
     }
 
     public static long resetDay(Instant instant) {
         return LocalDate.ofInstant(instant, RESET_ZONE).toEpochDay();
     }
 
-    public void observe(int completedTasks, List<CourierTask> offers, long currentResetDay) {
+    public void observe(int completedTasks, Port port, List<CourierTask> offers, long currentResetDay) {
         if (completedTasks / TASKS_PER_OFFER_CYCLE != previousCompletedTasks / TASKS_PER_OFFER_CYCLE
                 || completedTasks < previousCompletedTasks
                 || resetDay != currentResetDay) {
@@ -32,8 +32,8 @@ public final class OfferCycleTracker {
         }
         previousCompletedTasks = completedTasks;
         resetDay = currentResetDay;
-        if (!offers.isEmpty()) {
-            offersByPort.put(offers.get(0).board, List.copyOf(offers));
+        if (port != null) {
+            offersByPort.put(port, List.copyOf(offers));
         }
     }
 

@@ -11,6 +11,7 @@ import com.harbourmaster.model.TravelContext;
 import com.harbourmaster.model.TravelMethod;
 import com.harbourmaster.model.TravelStep;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -22,6 +23,7 @@ final class TravelRoutePlanner {
     private final PortGraph graph;
     private final TravelContext travel;
     private final Map<List<Port>, List<Journey>> playerRoutes = new HashMap<>();
+    private final Map<List<Object>, List<Journey>> cachedJourneys = new HashMap<>();
 
     TravelRoutePlanner(PortGraph graph, TravelContext travel) {
         this.graph = graph;
@@ -149,6 +151,20 @@ final class TravelRoutePlanner {
     }
 
     private List<Journey> journeys(
+            Visit visit, RouteEvent event, boolean loaded, boolean initial, WorldPoint boatPosition) {
+        return cachedJourneys.computeIfAbsent(
+                Arrays.asList(
+                        visit.player,
+                        visit.boat,
+                        event.port,
+                        event.action == RouteEvent.Action.ACCEPT,
+                        loaded,
+                        initial,
+                        boatPosition),
+                ignored -> findJourneys(visit, event, loaded, initial, boatPosition));
+    }
+
+    private List<Journey> findJourneys(
             Visit visit, RouteEvent event, boolean loaded, boolean initial, WorldPoint boatPosition) {
         List<Journey> result = new ArrayList<>();
         boolean canLeave = !travel.carryingCargo && visit.boat != null;

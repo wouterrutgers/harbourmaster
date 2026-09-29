@@ -24,6 +24,7 @@ public final class PortTracker {
     private Port associated;
     private Port start;
     private WorldPoint boatPosition;
+    private boolean atSea;
     private BoatSize boatSize = BoatSize.SLOOP;
 
     public void add(GameObject object) {
@@ -76,12 +77,12 @@ public final class PortTracker {
 
     public void update(Client client, Port board) {
         dock = null;
+        atSea = client.getVarbitValue(VarbitID.SAILING_TRANSMIT_IS_AT_SEA) != 0;
         WorldPoint location = position(client);
         updateBoatSize(client, location);
         if (location == null && board == null) {
             return;
         }
-        boolean atSea = client.getVarbitValue(VarbitID.SAILING_TRANSMIT_IS_AT_SEA) != 0;
         boolean aboard = client.getLocalPlayer() != null
                 && !client.getLocalPlayer().getWorldView().isTopLevel();
         boatPosition = aboard && board == null ? position(client, true) : null;
@@ -194,6 +195,7 @@ public final class PortTracker {
         associated = null;
         start = null;
         boatPosition = null;
+        atSea = false;
         boatSize = BoatSize.SLOOP;
     }
 
@@ -203,6 +205,10 @@ public final class PortTracker {
 
     public Port getDock() {
         return dock;
+    }
+
+    public boolean isAtSea() {
+        return atSea;
     }
 
     public WorldPoint getBoatPosition() {

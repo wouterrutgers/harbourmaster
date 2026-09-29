@@ -8,6 +8,7 @@ import com.harbourmaster.HarbourmasterConfig;
 import com.harbourmaster.HarbourmasterPlugin;
 import com.harbourmaster.model.ActiveTask;
 import com.harbourmaster.model.DockChecklist;
+import com.harbourmaster.model.DockGuidance;
 import com.harbourmaster.model.HarbourmasterSnapshot;
 import com.harbourmaster.model.Port;
 import com.harbourmaster.model.RoutePlan;
@@ -84,6 +85,17 @@ public class DockOverlayTest {
         }
 
         @Override
+        public DockGuidance getDockGuidance() {
+            return DockGuidance.next(
+                    getSnapshot(),
+                    !playerWorld.isTopLevel(),
+                    cargo.carryingDelivery(client, cargo.destinations(tasks, dock)),
+                    checkNoticeboard,
+                    shouldUnloadCargo(),
+                    false);
+        }
+
+        @Override
         public HarbourmasterSnapshot getSnapshot() {
             Map<Integer, CargoTracker.Destination> destinations = cargo.destinations(tasks, dock);
             return new HarbourmasterSnapshot(
@@ -132,7 +144,10 @@ public class DockOverlayTest {
         plugin.getPorts().add(object(boat(), ObjectID.SAILING_GANGPLANK_PROXY, 70));
         assertEquals(0, render().getRGB(20, 20));
 
+        carried = null;
         dock = B;
+        assertEquals(0, render().getRGB(20, 20));
+        carried = new Item(tasks.get(0).definition.itemId, 1);
         assertNotEquals(0, render().getRGB(20, 20));
         assertEquals(0, render().getRGB(80, 20));
         dock = null;
@@ -145,7 +160,7 @@ public class DockOverlayTest {
         WorldView shore = world(true);
         plugin.getPorts().add(object(shore, B.gangplankObject, 10));
         plugin.getPorts().add(object(shore, A.gangplankObject, 70));
-        assertNotEquals(0, render().getRGB(20, 20));
+        assertEquals(0, render().getRGB(20, 20));
         assertEquals(0, render().getRGB(80, 20));
 
         carried = new Item(tasks.get(0).definition.itemId, 1);
@@ -158,12 +173,13 @@ public class DockOverlayTest {
         dock = B;
         playerWorld = world(true);
         plugin.getPorts().add(object(playerWorld, B.gangplankObject, 10));
-        plugin.getPorts().add(object(playerWorld, A.gangplankObject, 70));
+        plugin.getPorts().add(object(playerWorld, B.ledgerObject, 70));
         assertNotEquals(0, render().getRGB(20, 20));
         assertEquals(0, render().getRGB(80, 20));
 
         carried = new Item(tasks.get(0).definition.itemId, 1);
         assertEquals(0, render().getRGB(20, 20));
+        assertNotEquals(0, render().getRGB(80, 20));
     }
 
     @Test
@@ -184,6 +200,7 @@ public class DockOverlayTest {
         playerWorld = world(true);
         plugin.getPorts().add(object(playerWorld, A.noticeboardObject, 10));
         route = new RouteOptimizer(line()).optimize(A, tasks);
+        checkNoticeboard = true;
 
         assertNotEquals(0, render().getRGB(20, 20));
     }

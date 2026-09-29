@@ -2,6 +2,7 @@ package com.harbourmaster.overlay;
 
 import com.harbourmaster.HarbourmasterConfig;
 import com.harbourmaster.HarbourmasterPlugin;
+import com.harbourmaster.model.DockGuidance;
 import com.harbourmaster.model.HarbourmasterSnapshot;
 import com.harbourmaster.model.RouteEvent;
 import com.harbourmaster.model.RouteLeg;
@@ -35,7 +36,12 @@ public final class RouteStatusOverlay extends OverlayPanel {
             return null;
         }
         panelComponent.getChildren().clear();
-        if (config.showRouteOverlay() && state.currentLeg != null && !state.currentLeg.sailingOnly()) {
+        DockGuidance guidance = plugin.getDockGuidance();
+        if (guidance != DockGuidance.NONE && config.showDockChecklist()) {
+            title(state.dock.port == null ? "Task cargo" : state.dock.port.name + " dock", config.activeRouteColor());
+            line(guidance.instruction, guidance.unload ? config.unloadColor() : config.loadColor());
+            line(guidance.detail, Color.WHITE);
+        } else if (config.showRouteOverlay() && state.currentLeg != null && !state.currentLeg.sailingOnly()) {
             int next = state.currentLeg.steps.get(0).kind == TravelStep.Kind.SAIL
                             && state.currentLeg.steps.get(0).points.size() == 1
                     ? 1
@@ -51,24 +57,6 @@ public final class RouteStatusOverlay extends OverlayPanel {
                 line(state.currentLeg.steps.get(next + 1).instruction, Color.WHITE);
             }
             estimatedTravelTime(state.currentLeg);
-        } else if (plugin.shouldUnloadCargo() && config.showDockChecklist()) {
-            title(state.dock.port.name + " dock", config.activeRouteColor());
-            line("Unload task cargo", config.unloadColor());
-            line("Take delivery crates before going ashore", Color.WHITE);
-        } else if (plugin.shouldCheckNoticeboard() && config.showDockChecklist()) {
-            title(state.dock.port.name + " dock", config.activeRouteColor());
-            line("Check the noticeboard", config.loadColor());
-            line("Read the offers before sailing", Color.WHITE);
-        } else if (!state.dock.actions.isEmpty()
-                && (state.nextPort() == null || state.dock.port == state.nextPort())
-                && config.showDockChecklist()) {
-            title(state.dock.port.name + " dock", config.activeRouteColor());
-            for (RouteEvent action : state.dock.actions) {
-                line(
-                        action.description(),
-                        action.action == RouteEvent.Action.DELIVER ? config.unloadColor() : config.loadColor());
-            }
-            line("Finish these actions before sailing", Color.WHITE);
         } else if (config.showRouteOverlay() && !state.route.stops.isEmpty()) {
             title(
                     state.currentLeg == null ? state.nextPort().name : "Travel to " + state.nextPort().name,
@@ -85,6 +73,9 @@ public final class RouteStatusOverlay extends OverlayPanel {
             } else {
                 estimatedTravelTime(state.currentLeg);
             }
+        } else if (config.showRouteOverlay() && plugin.isCalculatingPlan()) {
+            title("Updating route", config.activeRouteColor());
+            line("Choosing the next courier actions", Color.LIGHT_GRAY);
         } else if (config.showRouteOverlay() && !state.route.available) {
             title("Route unavailable", config.activeRouteColor());
             line(state.route.reason, Color.LIGHT_GRAY);

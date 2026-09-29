@@ -3,10 +3,13 @@ package com.harbourmaster;
 import static com.harbourmaster.Fixtures.*;
 import static org.junit.Assert.*;
 
+import com.harbourmaster.data.BoatSize;
 import com.harbourmaster.data.PortGraph;
 import com.harbourmaster.data.PortTaskCatalog;
+import com.harbourmaster.data.SailingRouteCache;
 import com.harbourmaster.model.BoatFocus;
 import com.harbourmaster.model.CourierTask;
+import com.harbourmaster.model.DockGuidance;
 import com.harbourmaster.model.Port;
 import com.harbourmaster.model.RouteEvent;
 import com.harbourmaster.model.RouteLeg;
@@ -291,20 +294,28 @@ public class HarbourmasterPluginTest {
         assertTrue(plugin.getSnapshot().sailingNext());
 
         dock();
-        varbits.put(VarbitID.SAILING_TRANSMIT_IS_AT_SEA, 0);
         plugin.onGameTick(new GameTick());
         publishPlan();
+        assertEquals(DockGuidance.TAKE_DELIVERY_CARGO, plugin.getDockGuidance());
+
+        varbits.put(VarbitID.SAILING_TRANSMIT_IS_AT_SEA, 0);
+        plugin.onGameTick(new GameTick());
 
         assertNull(plugin.getSnapshot().currentLeg);
         assertTrue(plugin.getSnapshot().dock.hasUnload());
         assertEquals(delivery.quantity, plugin.getSnapshot().dock.actions.get(0).quantity);
         assertTrue(plugin.shouldUnloadCargo());
+        assertEquals(DockGuidance.TAKE_DELIVERY_CARGO, plugin.getDockGuidance());
+
+        carried = new Item(delivery.itemId, 1);
+        assertEquals(DockGuidance.LEAVE_TO_DELIVER, plugin.getDockGuidance());
 
         aboard = false;
         plugin.onGameTick(new GameTick());
         publishPlan();
         assertNull(plugin.getSnapshot().currentLeg);
         assertTrue(plugin.getSnapshot().dock.hasUnload());
+        assertEquals(DockGuidance.DELIVER, plugin.getDockGuidance());
     }
 
     @Test
@@ -353,7 +364,7 @@ public class HarbourmasterPluginTest {
     public void rememberedOfferRouteSurvivesMovementAndUpdatesWhenTheSearchFinishes()
             throws ReflectiveOperationException, InterruptedException {
         plugin.getPorts().update(client, A);
-        ((OfferCycleTracker) field(plugin, "offerCycles").get(plugin)).observe(0, List.of(task));
+        ((OfferCycleTracker) field(plugin, "offerCycles").get(plugin)).observe(0, task.board, List.of(task));
         plugin.onGameTick(new GameTick());
         publishPlan();
         assertEquals(2, plugin.getSnapshot().route.stops.size());
@@ -373,7 +384,7 @@ public class HarbourmasterPluginTest {
     public void offerRouteRecoversAfterAnUnreachableBoatPosition()
             throws ReflectiveOperationException, InterruptedException {
         plugin.getPorts().update(client, A);
-        ((OfferCycleTracker) field(plugin, "offerCycles").get(plugin)).observe(0, List.of(task));
+        ((OfferCycleTracker) field(plugin, "offerCycles").get(plugin)).observe(0, task.board, List.of(task));
         plugin.onGameTick(new GameTick());
         publishPlan();
 
@@ -428,6 +439,84 @@ public class HarbourmasterPluginTest {
     }
 
     @Test
+    public void completingATaskReconsidersRepeatOffersBeforeTheRemainingBundleIsAccepted()
+            throws ReflectiveOperationException, InterruptedException {
+        CourierTask seeds = new CourierTask(
+                377,
+                9040,
+                "Lunar Isle crystal seed delivery",
+                76,
+                Port.PRIFDDINAS,
+                32581,
+                "Crystal seeds",
+                8,
+                2746,
+                Port.PRIFDDINAS,
+                Port.LUNAR_ISLE);
+        CourierTask hides = new CourierTask(
+                428,
+                9091,
+                "Deepfin Point suqah hide delivery",
+                76,
+                Port.LUNAR_ISLE,
+                32545,
+                "Suqah hides",
+                8,
+                4636,
+                Port.LUNAR_ISLE,
+                Port.DEEPFIN_POINT);
+        CourierTask fur = new CourierTask(
+                433,
+                9096,
+                "Lunar Isle fur delivery",
+                76,
+                Port.LUNAR_ISLE,
+                32578,
+                "Fur",
+                7,
+                9337,
+                Port.CIVITAS_ILLA_FORTIS,
+                Port.LUNAR_ISLE);
+        PortTaskCatalog catalog = (PortTaskCatalog) field(plugin, "catalog").get(plugin);
+        field(catalog, "byId").set(catalog, Map.of(seeds.id, seeds, hides.id, hides, fur.id, fur));
+        SailingRouteCache.load((PortGraph) field(plugin, "portGraph").get(plugin), BoatSize.SLOOP);
+        varbits.put(VarbitID.PORT_TASK_EXTRA_SLOTS_UNLOCKED, 1);
+        varbits.put(VarbitID.SAILING_LAST_PERSONAL_BOAT_BOARDED, 1);
+        varbits.put(VarbitID.SAILING_BOAT_1_KEEL, 4);
+        OfferCycleTracker offers =
+                (OfferCycleTracker) field(plugin, "offerCycles").get(plugin);
+        offers.observe(0, Port.PRIFDDINAS, List.of(seeds));
+        offers.observe(0, Port.LUNAR_ISLE, List.of(hides, fur));
+        location = Port.DEEPFIN_POINT.navigationLocation;
+        plugin.getPorts().update(client, Port.DEEPFIN_POINT);
+        plugin.onGameTick(new GameTick());
+        publishPlan();
+
+        location = Port.PRIFDDINAS.navigationLocation;
+        plugin.getPorts().update(client, Port.PRIFDDINAS);
+        varbits.put(TaskVarbits.IDS[0], seeds.id);
+        varbits.put(TaskVarbits.TAKEN[0], seeds.quantity);
+        plugin.onGameTick(new GameTick());
+        publishPlan();
+
+        location = Port.LUNAR_ISLE.navigationLocation;
+        plugin.getPorts().update(client, Port.LUNAR_ISLE);
+        varbits.put(TaskVarbits.IDS[1], hides.id);
+        varbits.put(TaskVarbits.TAKEN[1], hides.quantity);
+        plugin.onGameTick(new GameTick());
+        publishPlan();
+        assertEquals(List.of(fur), plugin.getSnapshot().courierPlan.selectedOffers);
+
+        varbits.remove(TaskVarbits.IDS[0]);
+        varbits.remove(TaskVarbits.TAKEN[0]);
+        varbits.put(VarbitID.PORT_TASKS_COMPLETED_TODAY, 1);
+        plugin.onGameTick(new GameTick());
+        publishPlan();
+
+        assertTrue(plugin.getSnapshot().courierPlan.selectedOffers.contains(seeds));
+    }
+
+    @Test
     public void rememberedOffersMustBeAcceptedBeforeTheEighthCompletion()
             throws ReflectiveOperationException, InterruptedException {
         CourierTask held = courier(2, A, B, 100);
@@ -437,7 +526,7 @@ public class HarbourmasterPluginTest {
         varbits.put(TaskVarbits.IDS[0], held.id);
         varbits.put(TaskVarbits.TAKEN[0], held.quantity);
         varbits.put(VarbitID.PORT_TASKS_COMPLETED_TODAY, 6);
-        ((OfferCycleTracker) field(plugin, "offerCycles").get(plugin)).observe(6, List.of(task));
+        ((OfferCycleTracker) field(plugin, "offerCycles").get(plugin)).observe(6, task.board, List.of(task));
         plugin.onGameTick(new GameTick());
         publishPlan();
         assertEquals(List.of(task), plugin.getSnapshot().courierPlan.selectedOffers);
@@ -476,7 +565,8 @@ public class HarbourmasterPluginTest {
         assertFalse(plugin.getSnapshot().dock.hasUnload());
 
         CourierTask betterOffer = new CourierTask(3, 3, "Better offer", 1, B, 103, "Cargo", 3, 10000, B, D);
-        ((OfferCycleTracker) field(plugin, "offerCycles").get(plugin)).observe(7, List.of(task, betterOffer));
+        ((OfferCycleTracker) field(plugin, "offerCycles").get(plugin))
+                .observe(7, task.board, List.of(task, betterOffer));
         plugin.onGameTick(new GameTick());
         publishPlan();
 
@@ -501,7 +591,7 @@ public class HarbourmasterPluginTest {
         assertTrue(plugin.shouldUnloadCargo());
         assertFalse(plugin.shouldCheckNoticeboard());
 
-        ((OfferCycleTracker) field(plugin, "offerCycles").get(plugin)).observe(7, List.of(task));
+        ((OfferCycleTracker) field(plugin, "offerCycles").get(plugin)).observe(7, task.board, List.of(task));
         plugin.onGameTick(new GameTick());
         publishPlan();
         assertTrue(plugin.getSnapshot().dock.hasAcceptance());
@@ -517,6 +607,32 @@ public class HarbourmasterPluginTest {
         plugin.onGameTick(new GameTick());
         assertFalse(plugin.shouldUnloadCargo());
         assertTrue(plugin.getSnapshot().dock.hasAcceptance());
+    }
+
+    @Test
+    public void completedPickupStopsShowingTheOldLedgerActionWhileTheNextRouteIsCalculated()
+            throws InterruptedException {
+        dock();
+        varbits.put(TaskVarbits.IDS[0], task.id);
+        plugin.onGameTick(new GameTick());
+        publishPlan();
+        assertEquals(DockGuidance.PICKUP, plugin.getDockGuidance());
+
+        varbits.put(TaskVarbits.TAKEN[0], task.quantity);
+        plugin.onGameTick(new GameTick());
+
+        assertTrue(plugin.isCalculatingPlan());
+        assertNotEquals(DockGuidance.PICKUP, plugin.getDockGuidance());
+
+        publishPlan();
+        assertEquals(D, plugin.getSnapshot().nextPort());
+        assertEquals(DockGuidance.BOARD_TO_SAIL, plugin.getDockGuidance());
+
+        aboard = true;
+        varbits.put(VarbitID.SAILING_TRANSMIT_IS_AT_SEA, 1);
+        plugin.onGameTick(new GameTick());
+        assertEquals(B, plugin.getSnapshot().dock.port);
+        assertEquals(DockGuidance.NONE, plugin.getDockGuidance());
     }
 
     @Test
@@ -634,10 +750,16 @@ public class HarbourmasterPluginTest {
         varbits.put(TaskVarbits.DELIVERED[0], task.quantity);
         tickAt(101);
         assertTrue(plugin.isGuidanceActive());
-        varbits.put(TaskVarbits.IDS[0], 0);
-        tickAt(160);
+        dock();
+        aboard = false;
+        tickAt(1000);
         assertTrue(plugin.isGuidanceActive());
-        tickAt(161);
+        assertEquals(DockGuidance.CLAIM_REWARDS, plugin.getDockGuidance());
+        varbits.put(TaskVarbits.IDS[0], 0);
+        tickAt(1001);
+        tickAt(1060);
+        assertTrue(plugin.isGuidanceActive());
+        tickAt(1061);
         assertFalse(plugin.isGuidanceActive());
     }
 

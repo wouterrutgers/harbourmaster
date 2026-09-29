@@ -53,7 +53,7 @@ public final class HarbourmasterSnapshot {
                         && (dock.port != nextPort() || !approach.sailingOnly())
                 ? approach
                 : null;
-        this.dock = currentLeg == null ? dock.follow(route) : DockChecklist.at(dock.port, List.of());
+        this.dock = currentLeg == null ? dock.follow(route) : dock.withoutActions();
         navigation = List.copyOf(route.legs.stream()
                 .flatMap(leg -> leg.steps.stream()
                         .filter(step -> step.kind == TravelStep.Kind.SAIL)
