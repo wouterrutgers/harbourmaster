@@ -16,8 +16,8 @@ public final class CharterRoutes {
 
     private CharterRoutes() {}
 
-    public static void add(List<TravelMethod> methods) {
-        methods.addAll(METHODS);
+    public static List<TravelMethod> getMethods() {
+        return METHODS;
     }
 
     private static List<TravelMethod> load() {

@@ -159,7 +159,7 @@ public final class TravelTracker {
             }
         }
         if (config.charterShips()) {
-            CharterRoutes.add(methods);
+            methods.addAll(CharterRoutes.getMethods());
         }
         Set<Integer> cargo = tasks.stream()
                 .filter(task -> task.definition != null)

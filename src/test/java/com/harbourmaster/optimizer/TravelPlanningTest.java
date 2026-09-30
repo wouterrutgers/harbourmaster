@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import net.runelite.api.coords.WorldPoint;
+import net.runelite.http.api.RuneLiteAPI;
 import org.junit.Test;
 
 public class TravelPlanningTest {
@@ -45,7 +46,7 @@ public class TravelPlanningTest {
             throw new AssertionError("Noticeboard planning must use generated sailing routes");
         });
         for (BoatSize size : BoatSize.values()) {
-            SailingRouteCache.load(graph, size);
+            SailingRouteCache.load(size, RuneLiteAPI.GSON).applyTo(graph);
         }
         graph.setShortcuts(true);
         CourierTask offer = new CourierTask(
@@ -170,7 +171,7 @@ public class TravelPlanningTest {
         PortGraph graph = new PortGraph((from, to, size) -> {
             throw new AssertionError("Use the committed sailing route");
         });
-        SailingRouteCache.load(graph, BoatSize.SKIFF);
+        SailingRouteCache.load(BoatSize.SKIFF, RuneLiteAPI.GSON).applyTo(graph);
         graph.setBoatSize(BoatSize.SKIFF);
         WorldPoint position = new WorldPoint(2328, 2683, 0);
         TravelContext travel = new TravelContext(1, null, BoatSize.SKIFF, true, false, true, List.of(), List.of());

@@ -20,11 +20,17 @@ import net.runelite.api.coords.WorldPoint;
 
 public final class SailingRouteCache {
     private static final int FORMAT_VERSION = 2;
-    private static final Gson GSON = new Gson();
+    private final BoatSize boatSize;
+    private final Map<Integer, Optional<RouteLeg>> routes;
+    private final Map<List<Object>, Optional<RouteLeg>> portalRoutes;
 
-    private SailingRouteCache() {}
+    private SailingRouteCache(RouteFile file, BoatSize boatSize, String resource) {
+        this.boatSize = boatSize;
+        routes = routes(file, boatSize, resource);
+        portalRoutes = portalRoutes(file, boatSize, resource);
+    }
 
-    public static void load(PortGraph graph, BoatSize boatSize) {
+    public static SailingRouteCache load(BoatSize boatSize, Gson gson) {
         String resource = "/com/harbourmaster/routes/" + boatSize.name().toLowerCase(Locale.ROOT) + ".json";
         InputStream source = SailingRouteCache.class.getResourceAsStream(resource);
         if (source == null) {
@@ -32,11 +38,14 @@ public final class SailingRouteCache {
         }
         try (InputStream input = source;
                 InputStreamReader reader = new InputStreamReader(input, StandardCharsets.UTF_8)) {
-            RouteFile file = GSON.fromJson(reader, RouteFile.class);
-            graph.loadRoutes(boatSize, routes(file, boatSize, resource), portalRoutes(file, boatSize, resource));
+            return new SailingRouteCache(gson.fromJson(reader, RouteFile.class), boatSize, resource);
         } catch (IOException exception) {
             throw new IllegalStateException("Unable to read generated sailing routes: " + resource, exception);
         }
+    }
+
+    public void applyTo(PortGraph graph) {
+        graph.loadRoutes(boatSize, routes, portalRoutes);
     }
 
     private static Map<Integer, Optional<RouteLeg>> routes(RouteFile file, BoatSize boatSize, String resource) {

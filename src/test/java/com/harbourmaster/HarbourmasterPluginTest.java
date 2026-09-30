@@ -3,9 +3,14 @@ package com.harbourmaster;
 import static com.harbourmaster.Fixtures.*;
 import static org.junit.Assert.*;
 
+import com.google.gson.Gson;
+import com.google.gson.TypeAdapter;
+import com.google.gson.TypeAdapterFactory;
+import com.google.gson.reflect.TypeToken;
 import com.harbourmaster.data.BoatSize;
 import com.harbourmaster.data.PortGraph;
 import com.harbourmaster.data.PortTaskCatalog;
+import com.harbourmaster.data.SailingPathfinder;
 import com.harbourmaster.data.SailingRouteCache;
 import com.harbourmaster.model.BoatFocus;
 import com.harbourmaster.model.CourierTask;
@@ -37,6 +42,7 @@ import net.runelite.api.Client;
 import net.runelite.api.EquipmentInventorySlot;
 import net.runelite.api.GameObject;
 import net.runelite.api.GameState;
+import net.runelite.api.IndexDataBase;
 import net.runelite.api.IndexedObjectSet;
 import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
@@ -52,6 +58,7 @@ import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.callback.ClientThread;
+import net.runelite.http.api.RuneLiteAPI;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -169,6 +176,11 @@ public class HarbourmasterPluginTest {
         switch (method) {
             case "getGameState":
                 return GameState.LOGGED_IN;
+            case "getIndex":
+                assertEquals(SailingPathfinder.MAP_INDEX_ID, arguments[0]);
+                return ApiStub.of(IndexDataBase.class, (operation, parameters) -> {
+                    throw new AssertionError("Initialization must use bundled routes: " + operation);
+                });
             case "getWidget":
                 if (arguments[0].equals(InterfaceID.PortTaskBoard.CONTAINER)) {
                     return board;
@@ -229,6 +241,7 @@ public class HarbourmasterPluginTest {
         field(catalog, "byId").set(catalog, Map.of(task.id, task));
         field(catalog, "byRow").set(catalog, Map.of(task.databaseRow, task));
         field(plugin, "client").set(plugin, client);
+        field(plugin, "gson").set(plugin, RuneLiteAPI.GSON);
         field(plugin, "catalog").set(plugin, catalog);
         field(plugin, "config").set(plugin, new HarbourmasterConfig() {
             @Override
@@ -272,6 +285,34 @@ public class HarbourmasterPluginTest {
     @After
     public void shutDown() {
         planner.shutdownNow();
+    }
+
+    @Test
+    public void initializationLoadsBundledRoutesOffTheClientThread()
+            throws ReflectiveOperationException, InterruptedException {
+        Thread clientThreadOwner = Thread.currentThread();
+        field(plugin, "portGraph").set(plugin, null);
+        field(plugin, "gson")
+                .set(
+                        plugin,
+                        RuneLiteAPI.GSON
+                                .newBuilder()
+                                .registerTypeAdapterFactory(new TypeAdapterFactory() {
+                                    @Override
+                                    public <T> TypeAdapter<T> create(Gson gson, TypeToken<T> type) {
+                                        assertNotSame(clientThreadOwner, Thread.currentThread());
+                                        return null;
+                                    }
+                                })
+                                .create());
+
+        plugin.onGameTick(new GameTick());
+        assertNull(field(plugin, "portGraph").get(plugin));
+
+        publishPlan();
+        PortGraph graph = (PortGraph) field(plugin, "portGraph").get(plugin);
+        assertTrue(graph.route(A, B).isPresent());
+        assertTrue(plugin.getSnapshot().loggedIn);
     }
 
     @Test
@@ -520,7 +561,8 @@ public class HarbourmasterPluginTest {
                 Port.LUNAR_ISLE);
         PortTaskCatalog catalog = (PortTaskCatalog) field(plugin, "catalog").get(plugin);
         field(catalog, "byId").set(catalog, Map.of(seeds.id, seeds, hides.id, hides, fur.id, fur));
-        SailingRouteCache.load((PortGraph) field(plugin, "portGraph").get(plugin), BoatSize.SLOOP);
+        SailingRouteCache.load(BoatSize.SLOOP, RuneLiteAPI.GSON)
+                .applyTo((PortGraph) field(plugin, "portGraph").get(plugin));
         varbits.put(VarbitID.PORT_TASK_EXTRA_SLOTS_UNLOCKED, 1);
         varbits.put(VarbitID.SAILING_LAST_PERSONAL_BOAT_BOARDED, 1);
         varbits.put(VarbitID.SAILING_BOAT_1_KEEL, 4);

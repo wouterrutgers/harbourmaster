@@ -12,6 +12,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import net.runelite.api.coords.WorldPoint;
+import net.runelite.http.api.RuneLiteAPI;
 import org.junit.Test;
 
 public class PortGraphTest {
@@ -241,7 +242,7 @@ public class PortGraphTest {
             throw new AssertionError("Precomputed port routes must not search terrain");
         });
         for (BoatSize boatSize : BoatSize.values()) {
-            SailingRouteCache.load(graph, boatSize);
+            SailingRouteCache.load(boatSize, RuneLiteAPI.GSON).applyTo(graph);
         }
 
         for (BoatSize boatSize : BoatSize.values()) {

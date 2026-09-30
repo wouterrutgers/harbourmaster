@@ -1,9 +1,12 @@
 package com.harbourmaster;
 
+import com.google.gson.Gson;
 import com.google.inject.Provides;
 import com.harbourmaster.data.BoatSize;
+import com.harbourmaster.data.CharterRoutes;
 import com.harbourmaster.data.PortGraph;
 import com.harbourmaster.data.PortTaskCatalog;
+import com.harbourmaster.data.SailingObstacles;
 import com.harbourmaster.data.SailingPathfinder;
 import com.harbourmaster.data.SailingRouteCache;
 import com.harbourmaster.model.ActiveTask;
@@ -78,6 +81,9 @@ public class HarbourmasterPlugin extends Plugin {
 
     @Inject
     private Client client;
+
+    @Inject
+    private Gson gson;
 
     @Inject
     private ClientThread clientThread;
@@ -460,6 +466,11 @@ public class HarbourmasterPlugin extends Plugin {
         optimizerInitializing = true;
         plannerExecutor.execute(() -> {
             SailingPathfinder.prepareMasks();
+            SailingObstacles.load();
+            CharterRoutes.getMethods();
+            SailingRouteCache[] routeCaches = Arrays.stream(BoatSize.values())
+                    .map(boatSize -> SailingRouteCache.load(boatSize, gson))
+                    .toArray(SailingRouteCache[]::new);
             clientThread.invokeLater(() -> {
                 optimizerInitializing = false;
                 if (!running || client.getGameState() != GameState.LOGGED_IN) {
@@ -467,8 +478,8 @@ public class HarbourmasterPlugin extends Plugin {
                 }
                 IndexDataBase mapIndex = client.getIndex(SailingPathfinder.MAP_INDEX_ID);
                 portGraph = new PortGraph(new SailingPathfinder(mapIndex, task -> clientThread.invokeLater(task)));
-                for (BoatSize boatSize : BoatSize.values()) {
-                    SailingRouteCache.load(portGraph, boatSize);
+                for (SailingRouteCache routeCache : routeCaches) {
+                    routeCache.applyTo(portGraph);
                 }
                 RouteOptimizer optimizer = new RouteOptimizer(portGraph);
                 routeTracker = new RouteTracker(optimizer);
