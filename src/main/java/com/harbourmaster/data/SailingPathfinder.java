@@ -731,7 +731,6 @@ public final class SailingPathfinder implements SailingRouter {
         try {
             return loaded.get();
         } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
             throw new CancellationException("Sailing search cancelled");
         } catch (ExecutionException exception) {
             throw new IllegalStateException("Unable to load sailing terrain region " + regionId, exception.getCause());
