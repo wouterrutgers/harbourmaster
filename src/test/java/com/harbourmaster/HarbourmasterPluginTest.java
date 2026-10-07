@@ -12,7 +12,6 @@ import com.harbourmaster.data.PortGraph;
 import com.harbourmaster.data.PortTaskCatalog;
 import com.harbourmaster.data.SailingPathfinder;
 import com.harbourmaster.data.SailingRouteCache;
-import com.harbourmaster.model.BoatFocus;
 import com.harbourmaster.model.CourierTask;
 import com.harbourmaster.model.DockGuidance;
 import com.harbourmaster.model.Port;
@@ -233,6 +232,7 @@ public class HarbourmasterPluginTest {
 
     @Before
     public void initialize() throws ReflectiveOperationException {
+        varbits.put(VarbitID.SAILING_BOAT_1_TELEPORT_FOCUS, 2);
         PortGraph graph = new PortGraph((from, to, size) -> {
             routeSearches++;
             if (from.equals(stalledPosition)) {
@@ -278,11 +278,6 @@ public class HarbourmasterPluginTest {
             @Override
             public boolean teleportToBoat() {
                 return true;
-            }
-
-            @Override
-            public BoatFocus boat1Focus() {
-                return BoatFocus.GREATER_TELEPORT_FOCUS;
             }
         });
         field(plugin, "running").set(plugin, true);

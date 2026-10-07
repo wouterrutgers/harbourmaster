@@ -4,7 +4,6 @@ import com.harbourmaster.HarbourmasterConfig;
 import com.harbourmaster.data.BoatSize;
 import com.harbourmaster.data.CharterRoutes;
 import com.harbourmaster.model.ActiveTask;
-import com.harbourmaster.model.BoatFocus;
 import com.harbourmaster.model.Port;
 import com.harbourmaster.model.TravelContext;
 import com.harbourmaster.model.TravelMethod;
@@ -53,6 +52,13 @@ public final class TravelTracker {
         VarbitID.SAILING_BOAT_4_TYPE,
         VarbitID.SAILING_BOAT_5_TYPE
     };
+    private static final int[] FOCUS = {
+        VarbitID.SAILING_BOAT_1_TELEPORT_FOCUS,
+        VarbitID.SAILING_BOAT_2_TELEPORT_FOCUS,
+        VarbitID.SAILING_BOAT_3_TELEPORT_FOCUS,
+        VarbitID.SAILING_BOAT_4_TELEPORT_FOCUS,
+        VarbitID.SAILING_BOAT_5_TELEPORT_FOCUS
+    };
     private static final int[] HOLDS = {
         InventoryID.SAILING_BOAT_1_CARGOHOLD,
         InventoryID.SAILING_BOAT_2_CARGOHOLD,
@@ -100,9 +106,6 @@ public final class TravelTracker {
         }
         boolean aboard = client.getLocalPlayer() != null
                 && !client.getLocalPlayer().getWorldView().isTopLevel();
-        BoatFocus[] focuses = {
-            config.boat1Focus(), config.boat2Focus(), config.boat3Focus(), config.boat4Focus(), config.boat5Focus()
-        };
         Port courierPort = null;
         List<TravelMethod> methods = new ArrayList<>();
         List<TravelMethod> summons = new ArrayList<>();
@@ -150,11 +153,12 @@ public final class TravelTracker {
             if (boat == courierBoat) {
                 courierPort = port;
             }
-            if (config.teleportToBoat() && focuses[boat - 1] == BoatFocus.GREATER_TELEPORT_FOCUS && port != null) {
+            int focus = client.getVarbitValue(FOCUS[boat - 1]);
+            if (config.teleportToBoat() && focus >= 2 && port != null) {
                 methods.add(new TravelMethod(
                         null, port, boat, TravelStep.Kind.TELEPORT, "Teleport to boat " + boat, 5, null));
             }
-            if (config.summonBoat() && focuses[boat - 1] != BoatFocus.NONE && boat == courierBoat && port != null) {
+            if (config.summonBoat() && focus > 0 && boat == courierBoat && port != null) {
                 summons.add(new TravelMethod(null, port, boat, TravelStep.Kind.SUMMON, "Summon boat " + boat, 5, null));
             }
         }

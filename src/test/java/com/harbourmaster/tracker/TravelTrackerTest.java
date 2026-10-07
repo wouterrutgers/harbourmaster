@@ -24,7 +24,6 @@ import org.junit.Test;
 public class TravelTrackerTest {
     private final TravelTracker tracker = new TravelTracker();
     private boolean teleportsEnabled;
-    private BoatFocus boat1Focus = BoatFocus.TELEPORT_FOCUS;
     private final HarbourmasterConfig config = new HarbourmasterConfig() {
         @Override
         public boolean aldarinTeleport() {
@@ -44,16 +43,6 @@ public class TravelTrackerTest {
         @Override
         public boolean teleportToBoat() {
             return teleportsEnabled;
-        }
-
-        @Override
-        public BoatFocus boat1Focus() {
-            return boat1Focus;
-        }
-
-        @Override
-        public BoatFocus boat2Focus() {
-            return BoatFocus.GREATER_TELEPORT_FOCUS;
         }
     };
     private final Map<Integer, Integer> varbits = new HashMap<>();
@@ -91,6 +80,7 @@ public class TravelTrackerTest {
         varbits.put(VarbitID.SAILING_LAST_PERSONAL_BOAT_BOARDED, 1);
         varbits.put(VarbitID.SAILING_BOAT_1_OWNED, 1);
         varbits.put(VarbitID.SAILING_BOAT_1_PORT, A.ordinal());
+        varbits.put(VarbitID.SAILING_BOAT_1_TELEPORT_FOCUS, 1);
         varbits.put(VarbitID.SPELLBOOK, 2);
         containers.put(InventoryID.SAILING_BOAT_1_CARGOHOLD, new Item[0]);
         List<ActiveTask> tasks = List.of(accepted(courier(1, Port.ALDARIN, A, 1000)));
@@ -110,6 +100,7 @@ public class TravelTrackerTest {
         varbits.put(VarbitID.SAILING_LAST_PERSONAL_BOAT_BOARDED, 1);
         varbits.put(VarbitID.SAILING_BOAT_1_OWNED, 1);
         varbits.put(VarbitID.SAILING_BOAT_1_PORT, A.ordinal());
+        varbits.put(VarbitID.SAILING_BOAT_1_TELEPORT_FOCUS, 1);
         teleportsEnabled = true;
         List<ActiveTask> tasks = List.of(accepted(courier(1, Port.DEEPFIN_POINT, A, 1000)));
 
@@ -128,22 +119,43 @@ public class TravelTrackerTest {
         varbits.put(VarbitID.SAILING_BOAT_1_PORT, A.ordinal());
         varbits.put(VarbitID.SAILING_BOAT_2_OWNED, 1);
         varbits.put(VarbitID.SAILING_BOAT_2_PORT, B.ordinal());
+        varbits.put(VarbitID.SAILING_BOAT_2_TELEPORT_FOCUS, 2);
         containers.put(InventoryID.SAILING_BOAT_1_CARGOHOLD, new Item[0]);
         List<ActiveTask> pickup = List.of(accepted(courier(1, Port.ALDARIN, A, 1000)));
 
-        boat1Focus = BoatFocus.NONE;
+        varbits.put(VarbitID.SAILING_BOAT_1_TELEPORT_FOCUS, 0);
         assertFalse(usesSummon(plan(A, pickup)));
-        boat1Focus = BoatFocus.TELEPORT_FOCUS;
+        varbits.put(VarbitID.SAILING_BOAT_1_TELEPORT_FOCUS, 1);
         assertTrue(usesSummon(plan(A, pickup)));
 
         List<ActiveTask> delivery = List.of(loaded(courier(1, A, C, 1000)));
         assertFalse(plan(B, delivery).available);
-        boat1Focus = BoatFocus.GREATER_TELEPORT_FOCUS;
+        varbits.put(VarbitID.SAILING_BOAT_1_TELEPORT_FOCUS, 2);
         RoutePlan returning = plan(B, delivery);
         assertTrue(returning.available);
         assertEquals(TravelStep.Kind.TELEPORT, returning.legs.get(0).steps.get(0).kind);
         assertEquals(
                 A.navigationLocation, returning.legs.get(0).steps.get(0).points.get(0));
+    }
+
+    @Test
+    public void parkedBoatWithGreaterFocusEnablesTeleportWithoutBoardingIt() {
+        teleportsEnabled = true;
+        varbits.put(VarbitID.SAILING_LAST_PERSONAL_BOAT_BOARDED, 1);
+        varbits.put(VarbitID.SAILING_BOAT_1_OWNED, 1);
+        varbits.put(VarbitID.SAILING_BOAT_1_PORT, A.ordinal());
+        varbits.put(VarbitID.SAILING_BOAT_1_TELEPORT_FOCUS, 1);
+        varbits.put(VarbitID.SAILING_BOAT_5_OWNED, 1);
+        varbits.put(VarbitID.SAILING_BOAT_5_PORT, D.ordinal());
+        varbits.put(VarbitID.SAILING_BOAT_5_TELEPORT_FOCUS, 2);
+        containers.put(InventoryID.SAILING_BOAT_1_CARGOHOLD, new Item[0]);
+
+        RoutePlan route = plan(A, List.of(accepted(courier(1, D, A, 1000))));
+
+        assertTrue(route.available);
+        assertEquals(TravelStep.Kind.TELEPORT, route.legs.get(0).steps.get(0).kind);
+        assertEquals(D.navigationLocation, route.legs.get(0).steps.get(0).points.get(0));
+        assertEquals(TravelStep.Kind.SUMMON, route.legs.get(0).steps.get(1).kind);
     }
 
     private RoutePlan plan(Port start, List<ActiveTask> tasks) {
