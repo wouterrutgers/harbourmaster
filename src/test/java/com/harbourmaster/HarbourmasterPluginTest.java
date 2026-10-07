@@ -47,6 +47,8 @@ import net.runelite.api.IndexedObjectSet;
 import net.runelite.api.Item;
 import net.runelite.api.ItemContainer;
 import net.runelite.api.Player;
+import net.runelite.api.Scene;
+import net.runelite.api.Tile;
 import net.runelite.api.WorldEntity;
 import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
@@ -69,6 +71,8 @@ public class HarbourmasterPluginTest {
     private final LinkedBlockingQueue<Runnable> callbacks = new LinkedBlockingQueue<>();
     private final Map<Integer, Integer> varbits = new HashMap<>();
     private final CourierTask task = new CourierTask(1, 1, "Observed offer", 1, B, 101, "Cargo", 3, 1000, B, D);
+    private long accountHash;
+    private GameState gameState = GameState.LOGGED_IN;
     private WorldPoint location = A.navigationLocation;
     private WorldPoint blockedPosition;
     private boolean aboard;
@@ -104,18 +108,26 @@ public class HarbourmasterPluginTest {
         }
         throw new AssertionError(method);
     });
+    private final Scene scene = ApiStub.of(Scene.class, (method, arguments) -> {
+        assertEquals("getTiles", method);
+        return new Tile[0][][];
+    });
     private final WorldView boat = ApiStub.of(WorldView.class, (method, arguments) -> {
         switch (method) {
             case "isTopLevel":
                 return false;
             case "getId":
                 return 0;
+            case "getScene":
+                return scene;
             default:
                 throw new AssertionError(method);
         }
     });
     private final WorldEntity entity = ApiStub.of(WorldEntity.class, (method, arguments) -> {
         switch (method) {
+            case "getWorldView":
+                return boat;
             case "getLocalLocation":
             case "transformToMainWorld":
                 return new LocalPoint(64, 64, WorldView.TOPLEVEL);
@@ -148,6 +160,8 @@ public class HarbourmasterPluginTest {
                 return location.getY();
             case "worldEntities":
                 return entities;
+            case "getScene":
+                return scene;
             default:
                 throw new AssertionError(method);
         }
@@ -175,7 +189,9 @@ public class HarbourmasterPluginTest {
     private final Client client = ApiStub.of(Client.class, (method, arguments) -> {
         switch (method) {
             case "getGameState":
-                return GameState.LOGGED_IN;
+                return gameState;
+            case "getAccountHash":
+                return accountHash;
             case "getIndex":
                 assertEquals(SailingPathfinder.MAP_INDEX_ID, arguments[0]);
                 return ApiStub.of(IndexDataBase.class, (operation, parameters) -> {
@@ -903,6 +919,46 @@ public class HarbourmasterPluginTest {
         tickAt(201);
         tickAt(261);
         assertTrue(plugin.isGuidanceActive());
+    }
+
+    @Test
+    public void rememberedOffersSurviveWorldHopsAndLogoutsForTheSameAccount() throws InterruptedException {
+        accountHash = 1;
+        dock();
+        boardOpen = true;
+        plugin.onGameTick(new GameTick());
+        publishPlan();
+        assertEquals(List.of(task), plugin.getSnapshot().courierPlan.selectedOffers);
+
+        boardOpen = false;
+        GameStateChanged event = new GameStateChanged();
+        for (GameState transition : List.of(GameState.HOPPING, GameState.LOGIN_SCREEN)) {
+            gameState = transition;
+            event.setGameState(gameState);
+            plugin.onGameStateChanged(event);
+
+            gameState = GameState.LOGGED_IN;
+            event.setGameState(gameState);
+            plugin.onGameStateChanged(event);
+            dock();
+            plugin.onGameTick(new GameTick());
+            publishPlan();
+
+            assertEquals(List.of(task), plugin.getSnapshot().courierPlan.selectedOffers);
+        }
+
+        gameState = GameState.LOGIN_SCREEN;
+        event.setGameState(gameState);
+        plugin.onGameStateChanged(event);
+        accountHash = 2;
+        gameState = GameState.LOGGED_IN;
+        event.setGameState(gameState);
+        plugin.onGameStateChanged(event);
+        dock();
+        plugin.onGameTick(new GameTick());
+        publishPlan();
+
+        assertTrue(plugin.getSnapshot().courierPlan.selectedOffers.isEmpty());
     }
 
     @Test

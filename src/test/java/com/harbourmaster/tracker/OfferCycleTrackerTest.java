@@ -27,8 +27,11 @@ public class OfferCycleTrackerTest {
         assertFalse(tracker.offers().containsKey(B));
         assertEquals(List.of(firstBoardOffer), tracker.offers().get(A));
 
+        tracker.observe(0, null, List.of(), OfferCycleTracker.resetDay(Instant.parse("2026-09-23T23:00:00Z")));
+        assertEquals(List.of(firstBoardOffer), tracker.offers().get(A));
+
         tracker.observe(
-                0, B, List.of(nextCycleOffer), OfferCycleTracker.resetDay(Instant.parse("2026-09-23T23:00:00Z")));
+                0, B, List.of(nextCycleOffer), OfferCycleTracker.resetDay(Instant.parse("2026-09-24T00:00:00Z")));
         assertFalse(tracker.offers().containsKey(A));
         assertEquals(List.of(nextCycleOffer), tracker.offers().get(B));
     }

@@ -4,14 +4,13 @@ import com.harbourmaster.model.CourierTask;
 import com.harbourmaster.model.Port;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 
 public final class OfferCycleTracker {
     private static final int TASKS_PER_OFFER_CYCLE = 8;
-    private static final ZoneId RESET_ZONE = ZoneId.of("Europe/London");
     private final Map<Port, List<CourierTask>> offersByPort = new EnumMap<>(Port.class);
     private int previousCompletedTasks = -1;
     private long resetDay = Long.MIN_VALUE;
@@ -21,7 +20,7 @@ public final class OfferCycleTracker {
     }
 
     public static long resetDay(Instant instant) {
-        return LocalDate.ofInstant(instant, RESET_ZONE).toEpochDay();
+        return LocalDate.ofInstant(instant, ZoneOffset.UTC).toEpochDay();
     }
 
     public void observe(int completedTasks, Port port, List<CourierTask> offers, long currentResetDay) {

@@ -27,9 +27,9 @@ The route status shows estimated travel time. Actual XP per hour also depends on
 
 ### Offer resets and memory
 
-Remembered offers are cleared after every eight completed tasks and at the daily reset at midnight UK time. After a reset, check boards as you reach ports to discover the new offers and build up a fresh plan.
+Remembered offers are cleared after every eight completed port tasks and at the daily reset at 00:00 UTC. After a reset, check boards as you reach ports to discover the new offers and build up a fresh plan.
 
-Logging out, hopping worlds or disabling the plugin also clears remembered offers. Reopen boards to make their offers available to the planner again. Moving between ports while staying logged in preserves that memory until the offer cycle resets.
+Logging out or hopping worlds preserves remembered offers when you return to the same account during the same offer cycle. Switching accounts, disabling the plugin or restarting RuneLite clears that memory. Reopen boards afterward to make their offers available to the planner again.
 
 ### If no offers are highlighted
 

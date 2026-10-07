@@ -129,6 +129,7 @@ public class HarbourmasterPlugin extends Plugin {
     private RouteTracker routeTracker;
     private CourierCyclePlanner cyclePlanner;
     private final OfferCycleTracker offerCycles = new OfferCycleTracker();
+    private long offerAccountHash;
     private final TravelTracker travelTracker = new TravelTracker();
     private TravelContext travelContext;
     private Port planStart;
@@ -175,7 +176,10 @@ public class HarbourmasterPlugin extends Plugin {
             overlayManager.remove(overlay);
         }
         plannerExecutor.shutdownNow();
-        clientThread.invokeLater(this::clear);
+        clientThread.invokeLater(() -> {
+            clearSession();
+            offerCycles.clear();
+        });
     }
 
     private List<Overlay> overlays() {
@@ -207,7 +211,7 @@ public class HarbourmasterPlugin extends Plugin {
     @Subscribe
     public void onGameStateChanged(GameStateChanged event) {
         if (event.getGameState() == GameState.LOGIN_SCREEN || event.getGameState() == GameState.HOPPING) {
-            clear();
+            clearSession();
         } else if (event.getGameState() == GameState.LOGGED_IN) {
             ports.scanScene(client);
             initializeOptimizer();
@@ -252,14 +256,13 @@ public class HarbourmasterPlugin extends Plugin {
         });
     }
 
-    private void clear() {
+    private void clearSession() {
         guidanceActivity.clear();
         guidanceActive = false;
         ports.clear();
         travelTracker.clear();
         travelContext = null;
         noticeboard.clear();
-        offerCycles.clear();
         clearPlan();
         previousInputs = null;
         snapshot = HarbourmasterSnapshot.empty();
@@ -283,6 +286,11 @@ public class HarbourmasterPlugin extends Plugin {
     private void refresh() {
         if (client.getGameState() != GameState.LOGGED_IN) {
             return;
+        }
+        long accountHash = client.getAccountHash();
+        if (accountHash != offerAccountHash) {
+            offerCycles.clear();
+            offerAccountHash = accountHash;
         }
         if (portGraph == null) {
             initializeOptimizer();
@@ -333,7 +341,8 @@ public class HarbourmasterPlugin extends Plugin {
         offerCycles.observe(
                 completedTasks,
                 noticeboard.isOpen() ? ports.getStart() : null,
-                noticeboard.isOpen() ? noticeboard.getOffers() : List.of());
+                noticeboard.isOpen() ? noticeboard.getOffers() : List.of(),
+                OfferCycleTracker.resetDay(clock.instant()));
         if (noticeboard.isDetailsOpen() || noticeboard.isOpeningDetails()) {
             return;
         }
