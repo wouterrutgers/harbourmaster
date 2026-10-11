@@ -24,6 +24,7 @@ public class PortTrackerTest {
     private final PortTracker tracker = new PortTracker();
     private WorldPoint location = Port.PORT_SARIM.navigationLocation;
     private boolean entityAvailable = true;
+    private boolean entityWorldViewAvailable;
     private boolean instance;
     private boolean aboard = true;
     private boolean atSea;
@@ -34,6 +35,8 @@ public class PortTrackerTest {
                 return false;
             case "getId":
                 return 0;
+            case "getScene":
+                return null;
             default:
                 throw new AssertionError(method);
         }
@@ -50,7 +53,7 @@ public class PortTrackerTest {
             case "transformToMainWorld":
                 return new LocalPoint(64, 64, WorldView.TOPLEVEL);
             case "getWorldView":
-                return null;
+                return entityWorldViewAvailable ? boat : null;
             default:
                 throw new AssertionError(method);
         }
@@ -197,6 +200,8 @@ public class PortTrackerTest {
 
     @Test
     public void sceneScanToleratesAnEntityWhoseWorldViewIsNotLoadedYet() {
+        tracker.scanScene(client);
+        entityWorldViewAvailable = true;
         tracker.scanScene(client);
     }
 

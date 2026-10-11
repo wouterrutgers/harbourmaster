@@ -188,6 +188,9 @@ public final class SailingPathfinder implements SailingRouter {
                 || !insideBounds(to.getX(), to.getY())) {
             return new CompletedSearch(Optional.empty());
         }
+        if (preparedBoatSize != boatSize || !to.equals(preparedDestination)) {
+            prepareDestination(to, boatSize);
+        }
 
         int start = key(from.getX(), from.getY());
         int destination = key(to.getX(), to.getY());
@@ -233,6 +236,12 @@ public final class SailingPathfinder implements SailingRouter {
     }
 
     private void prepareMoves(BoatSize boatSize) {
+        // Queue the map together instead of waiting for a client frame per region.
+        for (int regionX = minX >> 6; regionX <= maxX >> 6; regionX++) {
+            for (int regionY = minY >> 6; regionY <= maxY >> 6; regionY++) {
+                requestRegion(regionX * 256 + regionY);
+            }
+        }
         int tileCount = (maxX - minX + 1) * height;
         BitSet water = new BitSet(tileCount);
         for (int x = minX; x <= maxX; x++) {
@@ -742,7 +751,7 @@ public final class SailingPathfinder implements SailingRouter {
         return water != null && water.get(localTile);
     }
 
-    private BitSet region(int regionId) {
+    private CompletableFuture<BitSet> requestRegion(int regionId) {
         CompletableFuture<BitSet> loaded = waterByRegion.get(regionId);
         if (loaded == null) {
             CompletableFuture<BitSet> requested = new CompletableFuture<>();
@@ -751,6 +760,11 @@ public final class SailingPathfinder implements SailingRouter {
             }
             loaded = waterByRegion.get(regionId);
         }
+        return loaded;
+    }
+
+    private BitSet region(int regionId) {
+        CompletableFuture<BitSet> loaded = requestRegion(regionId);
         if (Thread.currentThread() == clientThreadOwner && !loadRegion(regionId, loaded)) {
             return null;
         }

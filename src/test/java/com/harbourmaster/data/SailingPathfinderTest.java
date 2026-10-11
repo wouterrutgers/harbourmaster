@@ -8,6 +8,7 @@ import java.awt.geom.Rectangle2D;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.BitSet;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -16,6 +17,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -94,6 +96,32 @@ public class SailingPathfinderTest {
         WorldPoint previous = route.points.get(route.points.size() - 2);
         assertEquals(40, previous.getX());
         assertTrue(previous.getY() > 30);
+    }
+
+    @Test(timeout = 5000)
+    public void sailingRouteFindsTheDetourAroundALongPeninsula() {
+        Set<Long> land = new HashSet<>();
+        for (int x = 380; x <= 600; x++) {
+            for (int y = 100; y <= 1023; y++) {
+                land.add(tile(x, y));
+            }
+        }
+        Map<Integer, byte[]> regions = new HashMap<>();
+        for (int x = 0; x < 16; x++) {
+            for (int y = 0; y < 16; y++) {
+                regions.put(x * 256 + y, terrain(x, y, 0, 1023, 0, 1023, land));
+            }
+        }
+        WorldPoint from = point(800, 900);
+        WorldPoint to = point(200, 900);
+
+        RouteLeg route = pathfinder(0, 1023, 0, 1023, regions)
+                .route(from, to, BoatSize.SKIFF)
+                .orElseThrow(AssertionError::new);
+
+        assertEquals(from, route.points.get(0));
+        assertEquals(to, route.points.get(route.points.size() - 1));
+        assertTrue(route.points.stream().anyMatch(point -> point.getY() < 100));
     }
 
     @Test
@@ -236,6 +264,39 @@ public class SailingPathfinderTest {
         assertNull(failure.get());
         assertTrue(route.get().distance > 0);
         assertEquals(Thread.currentThread(), indexThread.get());
+    }
+
+    @Test(timeout = 5000)
+    public void backgroundSearchLoadsCachedTerrainWithoutWaitingForEveryRegionInSeparateFrames()
+            throws InterruptedException, ExecutionException {
+        AtomicReference<Thread> indexThread = new AtomicReference<>();
+        LinkedBlockingQueue<BooleanSupplier> clientThreadCalls = new LinkedBlockingQueue<>();
+        Map<Integer, byte[]> regions = new HashMap<>();
+        byte[] water = terrain(0, 0, 0, 1023, 0, 1023, Set.of());
+        for (int x = 0; x < 16; x++) {
+            for (int y = 0; y < 16; y++) {
+                regions.put(x * 256 + y, water);
+            }
+        }
+        SailingPathfinder pathfinder = new SailingPathfinder(
+                new MemoryIndex(regions, indexThread), 0, 1023, 0, 1023, callback -> clientThreadCalls.add(callback));
+        ExecutorService worker = Executors.newSingleThreadExecutor();
+        try {
+            Future<Optional<RouteLeg>> route =
+                    worker.submit(() -> pathfinder.route(point(10, 10), point(1000, 500), BoatSize.SKIFF));
+            while (!route.isDone()) {
+                Thread.sleep(20);
+                List<BooleanSupplier> frame = new ArrayList<>();
+                clientThreadCalls.drainTo(frame);
+                for (BooleanSupplier callback : frame) {
+                    assertTrue(callback.getAsBoolean());
+                }
+            }
+            assertTrue(route.get().isPresent());
+            assertEquals(Thread.currentThread(), indexThread.get());
+        } finally {
+            worker.shutdownNow();
+        }
     }
 
     @Test

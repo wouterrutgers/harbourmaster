@@ -17,6 +17,7 @@ import com.harbourmaster.model.DockGuidance;
 import com.harbourmaster.model.Port;
 import com.harbourmaster.model.RouteEvent;
 import com.harbourmaster.model.RouteLeg;
+import com.harbourmaster.model.TravelStep;
 import com.harbourmaster.optimizer.CourierCyclePlanner;
 import com.harbourmaster.optimizer.RouteOptimizer;
 import com.harbourmaster.tracker.OfferCycleTracker;
@@ -368,6 +369,59 @@ public class HarbourmasterPluginTest {
         assertNull(plugin.getSnapshot().currentLeg);
         assertTrue(plugin.getSnapshot().dock.hasUnload());
         assertEquals(DockGuidance.DELIVER, plugin.getDockGuidance());
+    }
+
+    @Test
+    public void charterArrivalShowsPickupWhileTheRouteIsStillBeingCalculated()
+            throws ReflectiveOperationException, InterruptedException {
+        field(plugin, "config").set(plugin, new HarbourmasterConfig() {
+            @Override
+            public boolean useTeleports() {
+                return true;
+            }
+
+            @Override
+            public boolean sailorsAmuletPandemonium() {
+                return true;
+            }
+
+            @Override
+            public boolean charterShips() {
+                return true;
+            }
+        });
+        CourierTask pickup = courier(1, Port.PORT_PISCARILIUS, Port.LUNAR_ISLE, 1000);
+        PortTaskCatalog catalog = (PortTaskCatalog) field(plugin, "catalog").get(plugin);
+        field(catalog, "byId").set(catalog, Map.of(pickup.id, pickup));
+        varbits.put(TaskVarbits.IDS[0], pickup.id);
+        varbits.put(VarbitID.SAILING_LAST_PERSONAL_BOAT_BOARDED, 1);
+        varbits.put(VarbitID.SAILING_BOAT_1_OWNED, 1);
+        varbits.put(VarbitID.SAILING_BOAT_1_PORT, Port.PORT_PISCARILIUS.ordinal());
+        location = Port.LUNAR_ISLE.navigationLocation;
+        plugin.onGameTick(new GameTick());
+        publishPlan();
+        assertTrue(
+                plugin.getSnapshot().currentLeg.steps.stream().anyMatch(step -> step.kind == TravelStep.Kind.CHARTER));
+
+        planner.execute(() -> {
+            searchStarted.countDown();
+            try {
+                searchReleased.await();
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        assertTrue(searchStarted.await(5, TimeUnit.SECONDS));
+        location = new WorldPoint(1808, 3679, 0);
+        plugin.onGameTick(new GameTick());
+
+        dock(Port.PORT_PISCARILIUS);
+        plugin.onGameTick(new GameTick());
+        assertTrue(plugin.isCalculatingPlan());
+        assertEquals(DockGuidance.PICKUP, plugin.getDockGuidance());
+
+        searchReleased.countDown();
+        publishPlan();
     }
 
     @Test
@@ -979,11 +1033,15 @@ public class HarbourmasterPluginTest {
     }
 
     private void dock() {
-        location = B.navigationLocation;
+        dock(B);
+    }
+
+    private void dock(Port port) {
+        location = port.navigationLocation;
         plugin.getPorts().add(ApiStub.of(GameObject.class, (method, arguments) -> {
             switch (method) {
                 case "getId":
-                    return B.noticeboardObject;
+                    return port.noticeboardObject;
                 case "getWorldView":
                     return world;
                 case "getLocalLocation":
