@@ -2,7 +2,9 @@ package com.harbourmaster.data;
 
 import static org.junit.Assert.*;
 
+import com.harbourmaster.model.Port;
 import com.harbourmaster.model.RouteLeg;
+import java.awt.geom.Rectangle2D;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -11,6 +13,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutorService;
@@ -25,6 +28,63 @@ import net.runelite.api.coords.WorldPoint;
 import org.junit.Test;
 
 public class SailingPathfinderTest {
+    @Test
+    public void dangerousCachedCrossingsAreReplannedUntilTheBoatsArmourPreventsDamage() {
+        WorldPoint destination = Port.MUSA_POINT.navigationLocation;
+        WorldPoint start = point(destination.getX() + 56, destination.getY());
+        int creatureX = destination.getX() + 28;
+        int creatureY = destination.getY() + 17;
+        int minX = destination.getX() - 12;
+        int maxX = start.getX() + 12;
+        int minY = creatureY - 36;
+        int maxY = creatureY + 36;
+        Map<Integer, byte[]> regions = new HashMap<>();
+        for (int x = minX >> 6; x <= maxX >> 6; x++) {
+            for (int y = minY >> 6; y <= maxY >> 6; y++) {
+                regions.put(x * 256 + y, terrain(x, y, minX, maxX, minY, maxY, Set.of()));
+            }
+        }
+        PortGraph graph = new PortGraph(pathfinder(minX, maxX, minY, maxY, regions));
+        List<WorldPoint> crossing = List.of(
+                Port.PORT_SARIM.navigationLocation,
+                point(Port.PORT_SARIM.navigationLocation.getX(), destination.getY()),
+                destination);
+        graph.loadRoutes(
+                BoatSize.SLOOP,
+                Map.of(
+                        PortGraph.routeKey(Port.PORT_SARIM, Port.MUSA_POINT),
+                        Optional.of(
+                                new RouteLeg(Port.PORT_SARIM, Port.MUSA_POINT, measuredDistance(crossing), crossing))),
+                Map.of());
+        assertEquals(56, graph.routeFromPosition(start, Port.MUSA_POINT).orElseThrow().distance, 0);
+
+        SailingDangers dangers = new SailingDangers(List.of(new SailingDangers.Danger(7, creatureX, creatureY)));
+        graph.setDangerAvoidance(dangers, 0);
+        assertTrue(graph.routeFromPosition(start, Port.MUSA_POINT).isEmpty());
+        PortGraph computed = graph.detachedSnapshot(start);
+        RouteLeg detour = computed.routeFromPosition(start, Port.MUSA_POINT).orElseThrow();
+        graph.mergeComputedRoutes(computed);
+        assertTrue(detour.distance > 56);
+        Rectangle2D clearance = new Rectangle2D.Double(creatureX - 17.5, creatureY - 17.5, 35, 35);
+        for (int index = 1; index < detour.points.size(); index++) {
+            WorldPoint from = detour.points.get(index - 1);
+            WorldPoint to = detour.points.get(index);
+            assertFalse(clearance.intersectsLine(from.getX(), from.getY(), to.getX(), to.getY()));
+        }
+
+        graph.setDangerAvoidance(dangers, 7);
+        assertEquals(56, graph.routeFromPosition(start, Port.MUSA_POINT).orElseThrow().distance, 0);
+        assertEquals(
+                detour.distance,
+                computed.routeFromPosition(start, Port.MUSA_POINT).orElseThrow().distance,
+                0);
+
+        graph.setDangerAvoidance(dangers, 0);
+        assertTrue(graph.routeFromPosition(start, Port.MUSA_POINT).isEmpty());
+        graph.setDangerAvoidance(dangers, -1);
+        assertEquals(56, graph.routeFromPosition(start, Port.MUSA_POINT).orElseThrow().distance, 0);
+    }
+
     @Test
     public void portalApproachRetainsItsRequiredHeading() {
         SailingPathfinder pathfinder = pathfinder(0, 63, 0, 63, Map.of(0, terrain(0, 0, 0, 63, 0, 63, Set.of())));

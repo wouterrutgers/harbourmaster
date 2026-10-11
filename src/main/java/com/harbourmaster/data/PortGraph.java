@@ -15,7 +15,7 @@ import net.runelite.api.coords.WorldPoint;
 
 public final class PortGraph {
     private static final int ROUTE_FOLLOW_DISTANCE = 4;
-    private final SailingRouter router;
+    private SailingRouter router;
     private final boolean background;
     private final Map<Integer, Optional<RouteLeg>> routes = new HashMap<>();
     private final Map<Port, Optional<RouteLeg>> boatRoutes = new EnumMap<>(Port.class);
@@ -27,6 +27,8 @@ public final class PortGraph {
     private final Map<Integer, Optional<RouteLeg>> shortcutRoutes = new HashMap<>();
     private final Map<Port, RouteLeg> shortcutBoatRoutes = new EnumMap<>(Port.class);
     private boolean shortcuts;
+    private SailingDangers dangers;
+    private int damageReduction = -1;
 
     private BoatSize boatSize = BoatSize.SLOOP;
     private WorldPoint boatPosition;
@@ -47,16 +49,39 @@ public final class PortGraph {
             return false;
         }
         this.boatSize = boatSize;
+        resetRoutes();
+        return true;
+    }
+
+    public boolean setDangerAvoidance(SailingDangers dangers, int damageReduction) {
+        if (this.damageReduction == damageReduction) {
+            return false;
+        }
+        this.dangers = dangers;
+        this.damageReduction = damageReduction;
+        router = router.avoidingDanger(dangers, damageReduction);
+        resetRoutes();
+        return true;
+    }
+
+    private void resetRoutes() {
         routes.clear();
-        routes.putAll(precomputedRoutes.getOrDefault(boatSize, Map.of()));
+        restoreRoutes(precomputedRoutes.getOrDefault(boatSize, Map.of()), routes);
         boatRoutes.clear();
         preparedBoatRoutes.clear();
         portalSegments.clear();
-        portalSegments.putAll(precomputedPortalSegments.getOrDefault(boatSize, Map.of()));
+        restoreRoutes(precomputedPortalSegments.getOrDefault(boatSize, Map.of()), portalSegments);
         shortcutRoutes.clear();
         shortcutBoatRoutes.clear();
         missingRoutes = false;
-        return true;
+    }
+
+    private <K> void restoreRoutes(Map<K, Optional<RouteLeg>> saved, Map<K, Optional<RouteLeg>> destination) {
+        saved.forEach((key, route) -> {
+            if (route.isEmpty() || damageReduction < 0 || dangers.allows(route.get(), boatSize, damageReduction)) {
+                destination.put(key, route);
+            }
+        });
     }
 
     public boolean hasMissingRoutes() {
@@ -74,8 +99,8 @@ public final class PortGraph {
         precomputedRoutes.put(boatSize, routes);
         precomputedPortalSegments.put(boatSize, portalSegments);
         if (this.boatSize == boatSize) {
-            this.routes.putAll(routes);
-            this.portalSegments.putAll(portalSegments);
+            restoreRoutes(routes, this.routes);
+            restoreRoutes(portalSegments, this.portalSegments);
             shortcutRoutes.clear();
         }
     }
@@ -216,6 +241,8 @@ public final class PortGraph {
 
     public PortGraph detachedSnapshot(WorldPoint position) {
         PortGraph snapshot = new PortGraph(router, boatSize, true);
+        snapshot.dangers = dangers;
+        snapshot.damageReduction = damageReduction;
         snapshot.routes.putAll(routes);
         snapshot.shortcuts = shortcuts;
         snapshot.portalSegments.putAll(portalSegments);

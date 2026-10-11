@@ -92,6 +92,16 @@ public final class TravelTracker {
                 && client.getVarbitValue(VarbitID.SAILING_BT_GWENITH_GLIDE_MASTER_STATE) != 2;
     }
 
+    public int damageReduction(Client client, TravelContext travel, BoatSize boatSize) {
+        int boat = travel == null ? client.getVarbitValue(VarbitID.SAILING_LAST_PERSONAL_BOAT_BOARDED) : travel.boat;
+        if (boatSize == BoatSize.RAFT || boat < 1 || boat > 5) {
+            return 0;
+        }
+        int keel = DBTableID.SailingBoatKeel.Row.SAILING_BOAT_BRONZE_KEEL_2X5 + client.getVarbitValue(KEEL[boat - 1]);
+        int stats = (Integer) client.getDBTableField(keel, DBTableID.SailingBoatKeel.COL_FACILITY_STATS, 0)[0];
+        return (Integer) client.getDBTableField(stats, DBTableID.SailingBoatFacilityStats.COL_BOAT_ARMOUR, 0)[0] / 100;
+    }
+
     public TravelContext read(Client client, List<ActiveTask> tasks, HarbourmasterConfig config, Port currentDock) {
         if (docks.isEmpty()) {
             for (Port port : Port.values()) {

@@ -124,3 +124,10 @@ tasks.register('latestRouteCacheId', JavaExec) {
     args '--latest-cache-id'
     workingDir projectDir
 }
+
+tasks.register('generateSailingDangers', JavaExec) {
+    dependsOn tasks.named('generatorClasses')
+    classpath = generatorSourceSet.runtimeClasspath
+    mainClass = 'com.harbourmaster.tools.SailingDangerGenerator'
+    workingDir projectDir
+}

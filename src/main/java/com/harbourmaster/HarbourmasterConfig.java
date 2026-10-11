@@ -67,11 +67,21 @@ public interface HarbourmasterConfig extends Config {
     }
 
     @ConfigItem(
+            keyName = "avoidDangerousRoutes",
+            name = "Avoid dangerous routes",
+            description = "Avoid known aggressive sea creatures unless your boat's keel armour prevents their damage.",
+            section = route,
+            position = 1)
+    default boolean avoidDangerousRoutes() {
+        return false;
+    }
+
+    @ConfigItem(
             keyName = "showRouteOverlay",
             name = "Show route status",
             description = "Show the next destination and action while sailing.",
             section = route,
-            position = 1)
+            position = 2)
     default boolean showRouteOverlay() {
         return true;
     }
@@ -81,7 +91,7 @@ public interface HarbourmasterConfig extends Config {
             name = "Show world map route",
             description = "Draw the route on the world map.",
             section = route,
-            position = 2)
+            position = 3)
     default boolean showWorldMap() {
         return true;
     }
@@ -91,7 +101,7 @@ public interface HarbourmasterConfig extends Config {
             name = "Show in-world route",
             description = "Draw the current sailing leg in the world.",
             section = route,
-            position = 3)
+            position = 4)
     default boolean showWorldRoute() {
         return true;
     }
@@ -101,7 +111,7 @@ public interface HarbourmasterConfig extends Config {
             name = "Show minimap route",
             description = "Draw the current sailing leg on the minimap.",
             section = route,
-            position = 4)
+            position = 5)
     default boolean showMinimap() {
         return true;
     }
@@ -111,7 +121,7 @@ public interface HarbourmasterConfig extends Config {
             name = "Show complete route",
             description = "Also draw future legs in a subdued colour.",
             section = route,
-            position = 5)
+            position = 6)
     default boolean showCompleteRoute() {
         return false;
     }
@@ -122,7 +132,7 @@ public interface HarbourmasterConfig extends Config {
             name = "Active route colour",
             description = "Colour of the current sailing leg.",
             section = route,
-            position = 6)
+            position = 7)
     default Color activeRouteColor() {
         return new Color(70, 225, 175);
     }
@@ -133,7 +143,7 @@ public interface HarbourmasterConfig extends Config {
             name = "Future route colour",
             description = "Colour of future sailing legs.",
             section = route,
-            position = 7)
+            position = 8)
     default Color futureRouteColor() {
         return new Color(120, 145, 165, 130);
     }

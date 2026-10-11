@@ -57,6 +57,7 @@ public final class RouteDataGenerator {
         String cacheId = arguments.length == 0 || arguments[0].isEmpty() ? null : arguments[0];
         BoatSize boatSize = arguments.length < 2 || arguments[1].isEmpty() ? null : BoatSize.valueOf(arguments[1]);
         CharterDataGenerator.generate();
+        SailingDangerGenerator.generate();
         CacheRecord cache = cache(cacheId);
         Path cacheDirectory = download(cache);
         System.out.println("Using Old School live cache " + cache.id + " from " + cache.timestamp);

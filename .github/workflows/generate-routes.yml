@@ -73,6 +73,7 @@ jobs:
           path: |
             src/main/resources/com/harbourmaster/routes/${{ matrix.file_name }}.json
             src/main/resources/com/harbourmaster/routes/obstacles.dat.gz
+            src/main/resources/com/harbourmaster/routes/dangers.tsv
             src/main/resources/com/harbourmaster/charters.tsv
           if-no-files-found: error
 

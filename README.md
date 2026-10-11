@@ -45,6 +45,8 @@ If recommendations are missing, check that:
 
 Choose where to show your route: in the game world, on the minimap or on the world map. Enable **Show complete route** to see the rest of your planned journey. Highlight colours, dock guidance and cargo labels can also be adjusted in the plugin settings.
 
+Enable **Avoid dangerous routes** in **Route** to sail around known aggressive sharks and krakens. Harbourmaster reads your courier boat's fitted keel armour automatically and allows crossings past creatures that cannot damage it.
+
 In **Teleports and charter ships**, enable **Use teleports and charter ships** and select the methods you can use. Each method is disabled by default. Choices include Sailors' amulet destinations, Aldarin and Prifddinas house portals, teleport crystals, Lunar Isle teleports, boat teleports and summons, and charter ships. Spells, tablets and capes that reach the same place share one checkbox.
 
 Enabled methods are assumed available whenever the route needs them. The plugin does not check your gear, spellbook, levels, unlocks, charges, runes or coins. Make sure you have the required setup and supplies. Enabling charter ships assumes access to every charter destination.

@@ -5,6 +5,7 @@ import static org.junit.Assert.*;
 
 import com.harbourmaster.ApiStub;
 import com.harbourmaster.HarbourmasterConfig;
+import com.harbourmaster.data.BoatSize;
 import com.harbourmaster.data.PortGraph;
 import com.harbourmaster.model.*;
 import com.harbourmaster.optimizer.RouteOptimizer;
@@ -16,6 +17,7 @@ import net.runelite.api.Client;
 import net.runelite.api.Item;
 import net.runelite.api.ItemComposition;
 import net.runelite.api.ItemContainer;
+import net.runelite.api.gameval.DBTableID;
 import net.runelite.api.gameval.InventoryID;
 import net.runelite.api.gameval.ItemID;
 import net.runelite.api.gameval.VarbitID;
@@ -74,6 +76,33 @@ public class TravelTrackerTest {
                 throw new AssertionError(method);
         }
     });
+
+    @Test
+    public void damageProtectionFollowsTheCourierBoatWhileAnotherBoatWasLastBoarded() {
+        varbits.put(VarbitID.SAILING_LAST_PERSONAL_BOAT_BOARDED, 2);
+        varbits.put(VarbitID.SAILING_BOAT_1_KEEL, 5);
+        Client boats = ApiStub.of(Client.class, (method, arguments) -> {
+            if (method.equals("getVarbitValue")) {
+                return varbits.getOrDefault(arguments[0], 0);
+            }
+            assertEquals("getDBTableField", method);
+            if (arguments[1].equals(DBTableID.SailingBoatKeel.COL_FACILITY_STATS)) {
+                return new Object[] {
+                    arguments[0].equals(DBTableID.SailingBoatKeel.Row.SAILING_BOAT_RUNE_KEEL_2X5)
+                            ? DBTableID.SailingBoatFacilityStats.Row.SAILING_BOAT_RUNE_KEEL_2X5_STATS
+                            : DBTableID.SailingBoatFacilityStats.Row.SAILING_BOAT_BRONZE_KEEL_2X5_STATS
+                };
+            }
+            return new Object[] {
+                arguments[0].equals(DBTableID.SailingBoatFacilityStats.Row.SAILING_BOAT_RUNE_KEEL_2X5_STATS) ? 800 : 100
+            };
+        });
+        TravelContext courier = new TravelContext(1, A, BoatSize.SLOOP, false, false, true, List.of(), List.of());
+
+        assertEquals(8, tracker.damageReduction(boats, courier, courier.boatSize));
+        assertEquals(1, tracker.damageReduction(boats, null, BoatSize.SLOOP));
+        assertEquals(0, tracker.damageReduction(boats, null, BoatSize.RAFT));
+    }
 
     @Test
     public void manualSelectionsAllowTeleportsWithoutGearSuppliesOrUnlocks() {

@@ -6,6 +6,7 @@ import com.harbourmaster.data.BoatSize;
 import com.harbourmaster.data.CharterRoutes;
 import com.harbourmaster.data.PortGraph;
 import com.harbourmaster.data.PortTaskCatalog;
+import com.harbourmaster.data.SailingDangers;
 import com.harbourmaster.data.SailingObstacles;
 import com.harbourmaster.data.SailingPathfinder;
 import com.harbourmaster.data.SailingRouteCache;
@@ -324,6 +325,14 @@ public class HarbourmasterPlugin extends Plugin {
             clearPlan();
             previousInputs = null;
         }
+        if (portGraph.setDangerAvoidance(
+                SailingDangers.load(),
+                config.avoidDangerousRoutes()
+                        ? travelTracker.damageReduction(client, travelContext, routeBoatSize)
+                        : -1)) {
+            clearPlan();
+            previousInputs = null;
+        }
         planStart = travelContext == null ? ports.getStart() : travelTracker.playerPort(client, ports, travelContext);
         if (portGraph.setShortcuts(travelTracker.shortcutsAvailable(client, travelContext))) {
             clearPlan();
@@ -476,6 +485,7 @@ public class HarbourmasterPlugin extends Plugin {
         plannerExecutor.execute(() -> {
             SailingPathfinder.prepareMasks();
             SailingObstacles.load();
+            SailingDangers.load();
             CharterRoutes.getMethods();
             SailingRouteCache[] routeCaches = Arrays.stream(BoatSize.values())
                     .map(boatSize -> SailingRouteCache.load(boatSize, gson))

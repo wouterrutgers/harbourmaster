@@ -57,9 +57,11 @@ public final class SailingPathfinder implements SailingRouter {
     private double[] destinationDistances;
     private BoatSize preparedBoatSize;
     private BitSet[] preparedMoves;
-    private final AtomicReferenceArray<CompletableFuture<BitSet>> waterByRegion = new AtomicReferenceArray<>(1 << 16);
+    private final AtomicReferenceArray<CompletableFuture<BitSet>> waterByRegion;
     private final Consumer<BooleanSupplier> clientThreadInvoker;
     private final Thread clientThreadOwner;
+    private final SailingDangers dangers;
+    private final int damageReduction;
 
     public SailingPathfinder(IndexDataBase mapIndex, Consumer<BooleanSupplier> clientThreadInvoker) {
         this(mapIndex, clientThreadInvoker, LIVE_HEURISTIC_WEIGHT, SailingObstacles.load());
@@ -126,6 +128,30 @@ public final class SailingPathfinder implements SailingRouter {
         this.clientThreadInvoker = clientThreadInvoker;
         this.clientThreadOwner = Thread.currentThread();
         this.heuristicWeight = heuristicWeight;
+        this.waterByRegion = new AtomicReferenceArray<>(1 << 16);
+        this.dangers = null;
+        this.damageReduction = -1;
+    }
+
+    private SailingPathfinder(SailingPathfinder original, SailingDangers dangers, int damageReduction) {
+        this.mapIndex = original.mapIndex;
+        this.obstacles = original.obstacles;
+        this.minX = original.minX;
+        this.maxX = original.maxX;
+        this.minY = original.minY;
+        this.maxY = original.maxY;
+        this.height = original.height;
+        this.heuristicWeight = original.heuristicWeight;
+        this.clientThreadInvoker = original.clientThreadInvoker;
+        this.clientThreadOwner = original.clientThreadOwner;
+        this.waterByRegion = original.waterByRegion;
+        this.dangers = dangers;
+        this.damageReduction = damageReduction;
+    }
+
+    @Override
+    public SailingPathfinder avoidingDanger(SailingDangers dangers, int damageReduction) {
+        return new SailingPathfinder(this, dangers, damageReduction);
     }
 
     @Override
@@ -542,7 +568,7 @@ public final class SailingPathfinder implements SailingRouter {
             if (!loadedOnly) {
                 return SailingPathfinder.this.navigable(x, y);
             }
-            if (!insideBounds(x, y)) {
+            if (!insideBounds(x, y) || damageReduction >= 0 && dangers.blocks(x, y, damageReduction)) {
                 return false;
             }
             CompletableFuture<BitSet> loaded = waterByRegion.get((x >> 6) * 256 + (y >> 6));
@@ -707,7 +733,7 @@ public final class SailingPathfinder implements SailingRouter {
     }
 
     private boolean navigable(int x, int y) {
-        if (!insideBounds(x, y)) {
+        if (!insideBounds(x, y) || damageReduction >= 0 && dangers.blocks(x, y, damageReduction)) {
             return false;
         }
         int regionId = (x >> 6) * 256 + (y >> 6);
