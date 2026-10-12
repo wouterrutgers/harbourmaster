@@ -667,7 +667,7 @@ public class HarbourmasterPlugin extends Plugin {
 
     public boolean shouldUnloadCargo() {
         return isGuidanceActive()
-                && (travelContext == null || snapshot.dock.hasUnload())
+                && (travelContext == null || travelContext.aboard)
                 && cargo.needsUnload(client, snapshot.cargo);
     }
 

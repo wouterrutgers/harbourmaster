@@ -763,6 +763,30 @@ public class HarbourmasterPluginTest {
     }
 
     @Test
+    public void teleportPlanningDoesNotHideDeliveryCargoBehindANoticeboardVisit()
+            throws ReflectiveOperationException, InterruptedException {
+        useTeleports = true;
+        aboard = true;
+        CourierTask delivery = courier(2, A, Port.PORT_PISCARILIUS, 1);
+        PortTaskCatalog catalog = (PortTaskCatalog) field(plugin, "catalog").get(plugin);
+        field(catalog, "byId").set(catalog, Map.of(task.id, task, delivery.id, delivery));
+        dock(delivery.delivery);
+        varbits.put(TaskVarbits.IDS[0], delivery.id);
+        varbits.put(TaskVarbits.TAKEN[0], delivery.quantity);
+        varbits.put(VarbitID.SAILING_LAST_PERSONAL_BOAT_BOARDED, 1);
+        varbits.put(VarbitID.SAILING_BOAT_1_OWNED, 1);
+        varbits.put(VarbitID.SAILING_BOAT_1_PORT, delivery.delivery.ordinal());
+        varbits.put(VarbitID.PORT_TASK_EXTRA_SLOTS_UNLOCKED, 1);
+        varbits.put(VarbitID.PORT_TASKS_COMPLETED_TODAY, 7);
+        ((OfferCycleTracker) field(plugin, "offerCycles").get(plugin)).observe(7, task.board, List.of(task));
+        plugin.onGameTick(new GameTick());
+        publishPlan();
+
+        assertEquals(List.of(task), plugin.getSnapshot().courierPlan.selectedOffers);
+        assertEquals(DockGuidance.TAKE_DELIVERY_CARGO, plugin.getDockGuidance());
+    }
+
+    @Test
     public void completedTasksDoNotInterruptFetchingTheRemainingDeliveryCrates()
             throws ReflectiveOperationException, InterruptedException {
         CourierTask first = courier(2, A, B, 1000);
