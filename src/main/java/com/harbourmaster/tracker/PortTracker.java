@@ -57,7 +57,7 @@ public final class PortTracker {
     }
 
     private void scan(WorldView view) {
-        if (view == null || view.getScene() == null) {
+        if (view == null || view.getScene() == null || view.getScene().getTiles() == null) {
             return;
         }
         for (Tile[][] plane : view.getScene().getTiles()) {

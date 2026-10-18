@@ -28,6 +28,7 @@ public class PortTrackerTest {
     private boolean instance;
     private boolean aboard = true;
     private boolean atSea;
+    private Scene boatScene;
     private final int[][][] chunks = new int[4][13][13];
     private final WorldView boat = ApiStub.of(WorldView.class, (method, arguments) -> {
         switch (method) {
@@ -36,7 +37,7 @@ public class PortTrackerTest {
             case "getId":
                 return 0;
             case "getScene":
-                return null;
+                return boatScene;
             default:
                 throw new AssertionError(method);
         }
@@ -58,6 +59,7 @@ public class PortTrackerTest {
                 throw new AssertionError(method);
         }
     });
+    private List<WorldEntity> visibleEntities = List.of(entity);
     private final IndexedObjectSet<WorldEntity> entities = new IndexedObjectSet<WorldEntity>() {
         @Override
         public WorldEntity byIndex(int index) {
@@ -66,7 +68,7 @@ public class PortTrackerTest {
 
         @Override
         public java.util.Iterator<WorldEntity> iterator() {
-            return List.of(entity).iterator();
+            return visibleEntities.iterator();
         }
     };
     private final WorldView world = ApiStub.of(WorldView.class, (method, arguments) -> {
@@ -203,6 +205,56 @@ public class PortTrackerTest {
         tracker.scanScene(client);
         entityWorldViewAvailable = true;
         tracker.scanScene(client);
+    }
+
+    @Test
+    public void sceneScanFindsCargoAfterABoatWhoseTilesAreNotLoadedYet() {
+        GameObject hold = ApiStub.of(GameObject.class, (method, arguments) -> {
+            if (method.equals("getId")) {
+                return ObjectID.SAILING_BOAT_CARGO_HOLD_REGULAR_2X5;
+            }
+            throw new AssertionError(method);
+        });
+        Tile tile = ApiStub.of(Tile.class, (method, arguments) -> {
+            switch (method) {
+                case "getGroundObject":
+                    return null;
+                case "getGameObjects":
+                    return new GameObject[] {hold};
+                default:
+                    throw new AssertionError(method);
+            }
+        });
+        boatScene = ApiStub.of(Scene.class, (method, arguments) -> {
+            if (method.equals("getTiles")) {
+                return new Tile[][][] {{{tile}}};
+            }
+            throw new AssertionError(method);
+        });
+        Scene unloadedScene = ApiStub.of(Scene.class, (method, arguments) -> {
+            if (method.equals("getTiles")) {
+                return null;
+            }
+            throw new AssertionError(method);
+        });
+        WorldView unloadedWorld = ApiStub.of(WorldView.class, (method, arguments) -> {
+            if (method.equals("getScene")) {
+                return unloadedScene;
+            }
+            throw new AssertionError(method);
+        });
+        WorldEntity unloadedBoat = ApiStub.of(WorldEntity.class, (method, arguments) -> {
+            if (method.equals("getWorldView")) {
+                return unloadedWorld;
+            }
+            throw new AssertionError(method);
+        });
+        visibleEntities = List.of(unloadedBoat, entity);
+        entityWorldViewAvailable = true;
+
+        tracker.scanScene(client);
+
+        assertEquals(List.of(hold), tracker.getObjects());
     }
 
     @Test
