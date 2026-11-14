@@ -338,14 +338,14 @@ public class HarbourmasterPlugin extends Plugin {
             clearPlan();
             previousInputs = null;
         }
+        boolean atBoatOrDock = ports.getDock() != null
+                || client.getLocalPlayer() != null
+                        && !client.getLocalPlayer().getWorldView().isTopLevel();
         guidanceActive = guidanceActivity.update(
-                        !held.isEmpty(),
+                        !held.isEmpty() && atBoatOrDock,
                         noticeboard.isOpen() || noticeboard.isDetailsOpen() || noticeboard.isOpeningDetails(),
                         clock.instant())
-                && (travelContext != null
-                        || ports.getDock() != null
-                        || client.getLocalPlayer() != null
-                                && !client.getLocalPlayer().getWorldView().isTopLevel());
+                && (travelContext != null || atBoatOrDock);
         int completedTasks = client.getVarbitValue(VarbitID.PORT_TASKS_COMPLETED_TODAY);
         offerCycles.observe(
                 completedTasks,
