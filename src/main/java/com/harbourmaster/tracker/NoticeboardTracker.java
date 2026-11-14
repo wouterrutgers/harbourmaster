@@ -27,6 +27,8 @@ public final class NoticeboardTracker {
             return;
         }
         if (openingDetails) {
+            // Preserve the board for one scan without waiting indefinitely for a missed window.
+            openingDetails = false;
             return;
         }
         detailsOpen = false;

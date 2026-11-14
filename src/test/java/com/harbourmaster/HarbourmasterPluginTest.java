@@ -807,6 +807,31 @@ public class HarbourmasterPluginTest {
     }
 
     @Test
+    public void missingTaskDetailsDoesNotFreezePickupGuidance() throws InterruptedException {
+        dock();
+        varbits.put(TaskVarbits.IDS[0], task.id);
+        boardOpen = true;
+        plugin.onGameTick(new GameTick());
+        publishPlan();
+        assertEquals(DockGuidance.PICKUP, plugin.getDockGuidance());
+
+        plugin.getNoticeboard().beginOpeningDetails(boardEntry);
+        boardOpen = false;
+        plugin.onGameTick(new GameTick());
+
+        varbits.put(TaskVarbits.TAKEN[0], task.quantity);
+        plugin.onGameTick(new GameTick());
+
+        assertNotEquals(DockGuidance.PICKUP, plugin.getDockGuidance());
+        assertFalse(plugin.getSnapshot().boardOpen);
+        assertEquals(List.of(task), plugin.getNoticeboard().getOffers());
+        publishPlan();
+
+        assertEquals(D, plugin.getSnapshot().nextPort());
+        assertEquals(DockGuidance.BOARD_TO_SAIL, plugin.getDockGuidance());
+    }
+
+    @Test
     public void completedPickupStopsShowingTheOldLedgerActionWhileTheNextRouteIsCalculated()
             throws InterruptedException {
         dock();

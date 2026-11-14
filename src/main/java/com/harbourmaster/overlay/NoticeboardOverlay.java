@@ -52,32 +52,38 @@ public final class NoticeboardOverlay extends Overlay {
                 || !openingDetails && !boardVisible) {
             return null;
         }
-        if (!config.rankOffers() || !state.boardOpen || plugin.isCalculatingPlan()) {
+        boolean calculating = plugin.isCalculatingPlan();
+        if (!config.rankOffers() || !state.boardOpen && !calculating) {
             return null;
         }
         Graphics2D drawing = (Graphics2D) graphics.create();
-        drawing.setColor(config.bestOfferColor());
-        drawing.setStroke(new BasicStroke(3));
-        Point mouse = client.getMouseCanvasPosition();
-        for (CourierTask task : plugin.getNoticeboard().getOffers()) {
-            Widget widget = plugin.getNoticeboard().getWidgets().get(task.databaseRow);
-            if (widget == null || !openingDetails && widget.isHidden()) {
-                continue;
-            }
-            Rectangle bounds = widget.getBounds();
-            if (state.recommends(task)) {
-                drawing.draw(bounds);
-            }
-            if (!openingDetails && bounds.contains(mouse.getX(), mouse.getY())) {
-                tooltips.add(new Tooltip(details(task, state.courierPlan)));
+        if (!calculating) {
+            drawing.setColor(config.bestOfferColor());
+            drawing.setStroke(new BasicStroke(3));
+            Point mouse = client.getMouseCanvasPosition();
+            for (CourierTask task : plugin.getNoticeboard().getOffers()) {
+                Widget widget = plugin.getNoticeboard().getWidgets().get(task.databaseRow);
+                if (widget == null || !openingDetails && widget.isHidden()) {
+                    continue;
+                }
+                Rectangle bounds = widget.getBounds();
+                if (state.recommends(task)) {
+                    drawing.draw(bounds);
+                }
+                if (!openingDetails && bounds.contains(mouse.getX(), mouse.getY())) {
+                    tooltips.add(new Tooltip(details(task, state.courierPlan)));
+                }
             }
         }
-        if (!openingDetails && plugin.getNoticeboard().getOffers().stream().noneMatch(state::recommends)) {
-            String message = state.route.stops.isEmpty()
-                    ? "No suitable courier offers"
-                    : state.nextPort() == plugin.getNoticeboard().getPort()
-                            ? "Close the board and complete the dock actions"
-                            : "Continue to " + state.nextPort().name;
+        if (!openingDetails
+                && (calculating || plugin.getNoticeboard().getOffers().stream().noneMatch(state::recommends))) {
+            String message = calculating
+                    ? "Calculating route..."
+                    : state.route.stops.isEmpty()
+                            ? "No suitable courier offers"
+                            : state.nextPort() == plugin.getNoticeboard().getPort()
+                                    ? "Close the board and complete the dock actions"
+                                    : "Continue to " + state.nextPort().name;
             Rectangle bounds = client.getWidget(InterfaceID.PortTaskBoard.FRAME).getBounds();
             drawing.setFont(FontManager.getRunescapeSmallFont());
             OverlayUtil.renderTextLocation(
