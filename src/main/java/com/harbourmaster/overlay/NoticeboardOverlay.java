@@ -120,7 +120,7 @@ public final class NoticeboardOverlay extends Overlay {
             if (!plan.selectedOffers.isEmpty()) {
                 text.append("<br><br>Selected offers");
                 for (CourierTask selected : plan.selectedOffers) {
-                    text.append("<br>* ").append(selected.name);
+                    text.append("<br>- ").append(selected.name);
                 }
             }
         } else {
